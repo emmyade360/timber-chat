@@ -1,0 +1,35 @@
+services:
+  - type: web
+    runtime: rust
+    name: timber-chat-api
+    rootDir: backend
+    plan: starter
+    numInstances: 1
+    buildCommand: cargo build --release --locked
+    startCommand: ./target/release/timber-chat-backend
+    healthCheckPath: /health
+    maxShutdownDelaySeconds: 30
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+    envVars:
+      - key: RUST_LOG
+        value: info
+      - key: DATABASE_MAX_CONNECTIONS
+        value: "5"
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: WEBRTC_STUN_URLS
+        sync: false
+      - key: WEBRTC_TURN_URLS
+        sync: false
+      - key: WEBRTC_TURN_SHARED_SECRET
+        sync: false

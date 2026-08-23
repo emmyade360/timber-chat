@@ -1,60 +1,127 @@
+// UI state. The durable copy of everything here lives in the encrypted local
+// database; this store is the reactive view React renders from.
+
 import { create } from "zustand";
 
 export const useChatStore = create((set, get) => ({
-  rooms: [],
-  activeRoom: null,
+  me: null,
+  ladder: null,
+  conversations: [],
   messages: {},
-  typingUsers: {},
-  onlineUsers: new Set(),
-  readReceipts: {},
-  currentUser: null,
+  unread: {},
+  activeConversationId: null,
   friends: [],
   pendingReceived: [],
   pendingSent: [],
-  pendingRequestsCount: 0,
+  typing: {},
+  onlineUsers: new Set(),
+  levelUp: null,
+  syncing: false,
 
-  setRooms: (rooms) => set({ rooms }),
-  setActiveRoom: (room) => set({ activeRoom: room }),
-  addRoom: (room) => set((s) => ({ rooms: [...s.rooms, room] })),
+  setMe: (me) => set({ me }),
+  setLadder: (ladder) => set({ ladder }),
+  setSyncing: (syncing) => set({ syncing }),
+  setConversations: (conversations) => set({ conversations }),
+  removeConversation: (conversationId) =>
+    set((state) => {
+      const { [conversationId]: _messages, ...messages } = state.messages;
+      const { [conversationId]: _unread, ...unread } = state.unread;
+      const { [conversationId]: _typing, ...typing } = state.typing;
+      return {
+        conversations: state.conversations.filter((conversation) => conversation.id !== conversationId),
+        messages,
+        unread,
+        typing,
+        activeConversationId: state.activeConversationId === conversationId ? null : state.activeConversationId,
+      };
+    }),
+  setActiveConversation: (activeConversationId) => set({ activeConversationId }),
 
-  setMessages: (roomId, messages) =>
-    set((s) => ({ messages: { ...s.messages, [roomId]: messages } })),
+  setMessages: (conversationId, messages) =>
+    set((state) => ({ messages: { ...state.messages, [conversationId]: messages } })),
 
-  addMessage: (roomId, message) =>
-    set((s) => ({
-      messages: {
-        ...s.messages,
-        [roomId]: [...(s.messages[roomId] || []), message],
-      },
-    })),
-
-  setTyping: (roomId, userId, username, isTyping) =>
-    set((s) => {
-      const roomTyping = { ...(s.typingUsers[roomId] || {}) };
-      if (isTyping) roomTyping[userId] = username;
-      else delete roomTyping[userId];
-      return { typingUsers: { ...s.typingUsers, [roomId]: roomTyping } };
+  appendMessage: (conversationId, message) =>
+    set((state) => {
+      const existing = state.messages[conversationId] ?? [];
+      // The sender receives its own message back from the server; replace the
+      // optimistic copy rather than showing it twice.
+      const withoutDuplicate = existing.filter(
+        (entry) => entry.id !== message.id && entry.id !== message.clientId,
+      );
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: [...withoutDuplicate, message].sort((a, b) => a.createdAt - b.createdAt),
+        },
+      };
     }),
 
-  setUserOnline: (userId) =>
-    set((s) => { const next = new Set(s.onlineUsers); next.add(userId); return { onlineUsers: next }; }),
-
-  setUserOffline: (userId) =>
-    set((s) => { const next = new Set(s.onlineUsers); next.delete(userId); return { onlineUsers: next }; }),
-
-  addReadReceipt: (messageId, userId) =>
-    set((s) => ({
-      readReceipts: {
-        ...s.readReceipts,
-        [messageId]: [...(s.readReceipts[messageId] || []), userId],
+  prependMessages: (conversationId, older) =>
+    set((state) => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: [...older, ...(state.messages[conversationId] ?? [])],
       },
     })),
 
-  setCurrentUser: (user) => set({ currentUser: user }),
-  setFriends: (friends) => set({ 
-    friends: friends.friends || [],
-    pendingReceived: friends.pending_received || [],
-    pendingSent: friends.pending_sent || [],
-  }),
-  setPendingRequestsCount: (count) => set({ pendingRequestsCount: count }),
+  setUnread: (conversationId, count) =>
+    set((state) => ({ unread: { ...state.unread, [conversationId]: count } })),
+
+  clearUnread: (conversationId) =>
+    set((state) => ({ unread: { ...state.unread, [conversationId]: 0 } })),
+
+  setFriends: ({ friends, pending_received, pending_sent }) =>
+    set({
+      friends: friends ?? [],
+      pendingReceived: pending_received ?? [],
+      pendingSent: pending_sent ?? [],
+    }),
+
+  setTyping: (conversationId, username, isTyping) =>
+    set((state) => {
+      const next = { ...state.typing };
+      if (isTyping) next[conversationId] = username;
+      else delete next[conversationId];
+      return { typing: next };
+    }),
+
+  setUserOnline: (userId, online) =>
+    set((state) => {
+      const next = new Set(state.onlineUsers);
+      if (online) next.add(userId);
+      else next.delete(userId);
+      return { onlineUsers: next };
+    }),
+
+  markRead: (messageIds) =>
+    set((state) => {
+      const ids = new Set(messageIds);
+      const messages = {};
+      for (const [conversationId, list] of Object.entries(state.messages)) {
+        messages[conversationId] = list.map((message) =>
+          ids.has(message.id) ? { ...message, readByPeer: true } : message,
+        );
+      }
+      return { messages };
+    }),
+
+  showLevelUp: (levelUp) => set({ levelUp }),
+  dismissLevelUp: () => set({ levelUp: null }),
+
+  conversationById: (id) => get().conversations.find((entry) => entry.id === id) ?? null,
+
+  reset: () =>
+    set({
+      me: null,
+      conversations: [],
+      messages: {},
+      unread: {},
+      activeConversationId: null,
+      friends: [],
+      pendingReceived: [],
+      pendingSent: [],
+      typing: {},
+      onlineUsers: new Set(),
+      levelUp: null,
+    }),
 }));

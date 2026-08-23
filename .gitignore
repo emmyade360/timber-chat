@@ -1,6 +1,7 @@
 # Backend
 backend/.env
 backend/chat-app.exe
+backend/target
 
 # Frontend
 frontend/.env
