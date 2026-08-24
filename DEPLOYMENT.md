@@ -40,7 +40,7 @@ prompted secret environment values:
 | `SUPABASE_DB_URL` | Supabase **session pooler** SSL URL |
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_KEY` | Supabase service-role secret |
-| `ALLOWED_ORIGINS` | Exact frontend origin, e.g. `https://app.example.com` |
+| `ALLOWED_ORIGINS` | `https://timbachat.vercel.app` (exactly; no trailing slash) |
 | `WEBRTC_STUN_URLS` | Your comma-separated STUN URLs |
 | `WEBRTC_TURN_URLS` | Your UDP and TLS/TCP TURN URLs |
 | `WEBRTC_TURN_SHARED_SECRET` | Coturn `static-auth-secret` |
@@ -50,10 +50,10 @@ number. Render supplies `PORT`; Timber binds to it on `0.0.0.0` automatically.
 Set `RUST_LOG=info` and do not enable request-header logging.
 
 After Render deploys, copy its public HTTPS URL, for example
-`https://timber-chat-api.onrender.com`. Confirm:
+`https://timber-chat.onrender.com`. Confirm:
 
 ```sh
-curl --fail --silent --show-error https://timber-chat-api.onrender.com/health
+curl --fail --silent --show-error https://timber-chat.onrender.com/health
 ```
 
 The response must be `{"status":"ok"}`. Render terminates TLS and supports
@@ -68,12 +68,15 @@ scaling.
 
 1. Import the same repository in Vercel.
 2. Set **Root Directory** to `frontend`.
-3. Add these **Production** environment variables before the first production
-   build:
+3. The repository includes public production defaults that target the Render
+   service declared in `render.yaml`. If the service uses its default hostname,
+   no Vercel environment variables are necessary. If you use a different Render
+   or custom API hostname, add these **Production** environment variables before
+   the build (they override the defaults):
 
    ```text
-   VITE_API_URL=https://timber-chat-api.onrender.com
-   VITE_WS_URL=wss://timber-chat-api.onrender.com
+   VITE_API_URL=https://<your-Render-service>.onrender.com
+   VITE_WS_URL=wss://<your-Render-service>.onrender.com
    ```
 
    Use your Render custom API domain instead if you configured one. Values must
@@ -81,9 +84,9 @@ scaling.
 4. Deploy. [frontend/vercel.json](./frontend/vercel.json) supplies the Vite
    build command, SPA fallback, no-store policy, CSP, HSTS, clickjacking
    protection, referrer policy, and camera/microphone permission policy.
-5. Copy the final Vercel production origin (or attach your custom domain), then
-   return to Render and set `ALLOWED_ORIGINS` to that exact origin if it differs
-   from the value used in step 1. Redeploy the API after changing it.
+5. The supplied blueprint already configures `ALLOWED_ORIGINS` as
+   `https://timbachat.vercel.app`. If a custom frontend domain is added, replace
+   that value with the new exact origin and redeploy the API.
 
 Vite embeds `VITE_*` values into the built JavaScript. Changing either variable
 requires a new Vercel deployment; editing it after a deploy does not change

@@ -1,7 +1,7 @@
 services:
   - type: web
     runtime: rust
-    name: timber-chat-api
+    name: timber-chat
     rootDir: backend
     plan: starter
     numInstances: 1
@@ -26,7 +26,9 @@ services:
       - key: SUPABASE_SERVICE_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        sync: false
+        # The deployed browser origin. Keep this exact (no trailing slash) so
+        # CORS and WebSocket origin checks accept only the Timber web app.
+        value: https://timbachat.vercel.app
       - key: WEBRTC_STUN_URLS
         sync: false
       - key: WEBRTC_TURN_URLS
