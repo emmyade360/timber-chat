@@ -132,7 +132,14 @@ export default function People({ onOpenConversation }) {
             {searchState === "done" && visibleResults.length === 0 && "No Timber users match that username."}
           </div>
           {visibleResults.map((user) => (
-            <Row key={user.id} user={user} online={onlineUsers.has(user.id)}>
+            <Row
+              key={user.id}
+              user={user}
+              online={onlineUsers.has(user.id)}
+              footnote={user.last_chance
+                ? "Declined once — if declined again you cannot ask any more."
+                : null}
+            >
               <SearchAction
                 user={user}
                 busy={busyId === user.id}
@@ -256,14 +263,10 @@ function SearchAction({ user, busy, onAdd, onOpen }) {
   if (user.friend_status === "incoming") return <span className="row-note">Wants to add you</span>;
 
   return (
-    <div className="row-actions row-actions--stack">
+    <div className="row-actions">
       <button className="btn-wood btn-sm" disabled={busy} onClick={onAdd}>
-        {user.friend_status === "rejected" ? "Try once more" : "Add friend"}
+        {busy ? "Sending…" : user.friend_status === "rejected" ? "Try once more" : "Add friend"}
       </button>
-      {/* The rule is unusual enough that it has to be said out loud. */}
-      {user.last_chance && (
-        <span className="row-warning">Declined once — if declined again you cannot ask any more.</span>
-      )}
     </div>
   );
 }
@@ -277,7 +280,12 @@ function Section({ title, children }) {
   );
 }
 
-function Row({ user, online, children }) {
+/**
+ * One person in a list: identity on the left, the single next action on the
+ * right, and an optional note on its own line so a long warning never squeezes
+ * the button into an unreadable column.
+ */
+function Row({ user, online, children, footnote }) {
   const name = user.username;
   return (
     <div className="people-row">
@@ -288,10 +296,11 @@ function Row({ user, online, children }) {
         <span className="people-row-name">@{name}</span>
         <span className="people-row-level">
           <LevelBadge level={user.level} size={13} />
-          {user.level_name}
+          <span>{user.level_name}</span>
         </span>
       </span>
       {children}
+      {footnote && <p className="row-footnote">{footnote}</p>}
     </div>
   );
 }
