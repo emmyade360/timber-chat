@@ -140,6 +140,8 @@ export function apiError(error, fallback = "Something went wrong. Please try aga
 
 // --- endpoints -------------------------------------------------------------
 
+/** Unauthenticated liveness probe; also reports the relay's running version. */
+export const getHealth = () => api.get("/health");
 export const getCurrentUser = () => api.get("/api/users/me");
 export const updateCurrentUser = (profile) => api.patch("/api/users/me", profile);
 export const getConversations = () => api.get("/api/conversations");

@@ -14,6 +14,7 @@ import {
   updateNotificationSettings,
 } from "../../lib/notifications.js";
 import { callAlertsEnabled, disableCallAlerts, enableCallAlerts, pushSupported } from "../../lib/push.js";
+import { getHealth } from "../../lib/api.js";
 
 export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped }) {
   const { me, ladder } = useChatStore();
@@ -137,10 +138,55 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
         </button>
       </section>
 
+      <section className="panel">
+        <h3 className="section-title">About</h3>
+        <BuildInfo />
+      </section>
+
       {panel === "phrase" && <RevealPhrase onClose={() => setPanel(null)} />}
       {panel === "pin" && <ChangePin onClose={() => setPanel(null)} />}
       {panel === "wipe" && <WipeDevice onClose={() => setPanel(null)} onWiped={onWiped} />}
     </div>
+  );
+}
+
+/**
+ * The version this device is running, and the one the relay is running.
+ *
+ * Worth a row of its own: the first useful question about any bug report is
+ * which build the person is on, and an installed PWA can sit on a cached shell
+ * for a while after a release.
+ */
+function BuildInfo() {
+  const [server, setServer] = useState(null);
+  useEffect(() => {
+    let live = true;
+    getHealth()
+      .then(({ data }) => { if (live) setServer(data.version ?? "unknown"); })
+      .catch(() => { if (live) setServer("unreachable"); });
+    return () => { live = false; };
+  }, []);
+
+  return (
+    <>
+      <div className="settings-row">
+        <div>
+          <span className="settings-row-title">App</span>
+          <span className="settings-row-note">This device</span>
+        </div>
+        <span className="settings-row-state">{__APP_VERSION__}</span>
+      </div>
+      <div className="settings-row">
+        <div>
+          <span className="settings-row-title">Relay</span>
+          <span className="settings-row-note">Timber service</span>
+        </div>
+        <span className="settings-row-state">{server ?? "…"}</span>
+      </div>
+      <p className="panel-note">
+        Quote the app version if you ever report a problem. It never identifies you.
+      </p>
+    </>
   );
 }
 

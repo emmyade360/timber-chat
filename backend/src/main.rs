@@ -367,7 +367,10 @@ async fn health(State(state): State<AppState>) -> Result<Json<Value>, error::Api
     sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&state.db)
         .await?;
-    Ok(Json(json!({ "status": "ok" })))
+    // The running version, so a report from a user can be tied to a build
+    // without guessing which deploy they are talking to. It is the same number
+    // the frontend shows in settings.
+    Ok(Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") })))
 }
 
 /// Render sends SIGTERM while redeploying. Stop accepting new connections while
@@ -447,5 +450,32 @@ mod tests {
         assert_eq!(request_log_path("/invites/ABCD1234"), "/invites/:code");
         assert_eq!(request_log_path("/api/conversations/a/b"), "/api/conversations/:id");
         assert_eq!(request_log_path("/health"), "/health");
+    }
+
+    /// Two migrations sharing a version number is not a build error: it fails at
+    /// startup, against the live database, as `VersionMismatch`, because the
+    /// checksum recorded for that version cannot match both files. Catch it here
+    /// instead, where it costs nothing.
+    #[test]
+    fn migration_versions_are_unique() {
+        let mut seen: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+        for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .expect("migrations directory is readable")
+        {
+            let name = entry.expect("readable entry").file_name().to_string_lossy().into_owned();
+            if !name.ends_with(".sql") {
+                continue;
+            }
+            let (prefix, _) = name.split_once('_').unwrap_or_else(|| {
+                panic!("migration {name} must be named <version>_<description>.sql")
+            });
+            let version: u32 = prefix
+                .parse()
+                .unwrap_or_else(|_| panic!("migration {name} must start with a numeric version"));
+            if let Some(existing) = seen.insert(version, name.clone()) {
+                panic!("migrations {existing} and {name} share version {version}");
+            }
+        }
+        assert!(seen.len() >= 9, "expected the full migration set, found {}", seen.len());
     }
 }

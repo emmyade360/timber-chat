@@ -1,9 +1,16 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// The release workflow keeps package.json in step with VERSION at the repo
+// root, so reading it here means the shipped bundle always states the build it
+// came from.
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [
     react(),
     VitePWA({
@@ -34,6 +41,11 @@ export default defineConfig({
   ],
   test: {
     environment: 'node',
+    // The vault suite runs the real scrypt (N = 2^16) once per unlock attempt,
+    // and the self-destruct test spends the whole attempt limit. That is ~4.4s
+    // on an idle machine, which overruns the 5s default the moment CI shares a
+    // runner. The KDF is deliberately slow; the budget was the wrong part.
+    testTimeout: 30_000,
     setupFiles: ['./src/test/setup.js'],
     include: ['src/**/*.test.js', 'src/**/*.test.jsx'],
   },

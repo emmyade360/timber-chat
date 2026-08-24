@@ -9,6 +9,72 @@ permissions:
   contents: read
 
 jobs:
+  commits:
+    name: Commit convention
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Conventional Commit subjects
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/lint-commits.mjs "$BASE" "$HEAD"
+
+  release:
+    name: Version and release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [frontend, backend, migrations]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The bump is derived from the commits since the last tag, so the
+          # whole history and every tag has to be present.
+          fetch-depth: 0
+      - run: node --test scripts/version.test.mjs
+      - name: Compute and apply the next version
+        id: version
+        run: node scripts/version.mjs apply >> "$GITHUB_OUTPUT"
+      - name: Commit, tag and push
+        if: steps.version.outputs.released == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          BOOTSTRAP: ${{ steps.version.outputs.bootstrap }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$BOOTSTRAP" = "true" ]; then
+            # First run: plant the baseline tag on the current commit without
+            # inventing a release for history written before this convention.
+            git tag -a "$TAG" -m "Baseline $TAG"
+            git push origin "$TAG"
+            exit 0
+          fi
+          git add VERSION CHANGELOG.md backend/Cargo.toml backend/Cargo.lock frontend/package.json frontend/package-lock.json
+          # [skip ci] stops this commit re-entering the workflow. Render is
+          # deliberately NOT skipped: this commit is the one carrying the new
+          # version, so it is the one that should be running in production.
+          git commit -m "chore(release): $VERSION [skip ci]"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin HEAD:main --follow-tags
+      - name: Publish the GitHub release
+        if: steps.version.outputs.released == 'true' && steps.version.outputs.bootstrap == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The newest section of the changelog is this release's notes.
+          awk '/^## /{ n++ } n == 1' CHANGELOG.md > /tmp/notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
