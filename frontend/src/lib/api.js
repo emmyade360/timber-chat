@@ -166,9 +166,35 @@ export const lookupInvite = (code) => api.get(`/invites/${encodeURIComponent(cod
 export const inviteUrl = (code) => `${window.location.origin}/?invite=${code}`;
 
 /** Read an invite code out of the landing URL, if the visitor arrived by one. */
+/**
+ * An invite code is a capability: it auto-friends the bearer with the inviter.
+ * So it is read once and scrubbed out of the address bar, which stops it being
+ * carried in browser history, in a link the visitor shares or bookmarks, or in
+ * any page-level analytics that records the current URL.
+ *
+ * The scrub happens exactly once and the result is memoised, so repeat calls --
+ * including StrictMode's deliberate double-invocation of state initialisers --
+ * return the same code rather than losing it on the second read.
+ */
+let landingInviteCode;
+
 export function inviteCodeFromUrl() {
-  const fromQuery = new URLSearchParams(window.location.search).get("invite");
-  return (fromQuery ?? "").trim().toUpperCase() || null;
+  if (landingInviteCode !== undefined) return landingInviteCode;
+  if (typeof window === "undefined") return null;
+
+  const search = new URLSearchParams(window.location.search);
+  const fromQuery = search.get("invite");
+  if (fromQuery !== null) {
+    search.delete("invite");
+    const query = search.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+  }
+  landingInviteCode = (fromQuery ?? "").trim().toUpperCase() || null;
+  return landingInviteCode;
 }
 export const createWebSocketTicket = () => api.post("/api/ws-ticket");
 export const getWebRtcIceServers = () => api.get("/api/webrtc/ice-servers");

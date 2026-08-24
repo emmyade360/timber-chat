@@ -1,8 +1,16 @@
+# Netlify / Cloudflare Pages equivalent of the headers in ../vercel.json.
+# Keep the two in step: whichever host serves the build is the one that decides
+# what an injected script would be allowed to do.
 /*
   Cache-Control: no-store
+  Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data: blob: https:; font-src 'self'; media-src 'self' blob:; connect-src 'self' https://timber-chat.onrender.com wss://timber-chat.onrender.com; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests
+  Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
-  Referrer-Policy: no-referrer
-  Strict-Transport-Security: max-age=31536000
-  Permissions-Policy: camera=(self), microphone=(self), geolocation=(), payment=()
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  X-XSS-Protection: 0
+  X-Permitted-Cross-Domain-Policies: none
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Origin-Agent-Cluster: ?1
