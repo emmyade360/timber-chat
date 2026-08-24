@@ -41,6 +41,9 @@ const MAX_CIPHERTEXT_BYTES: usize = 8192;
 const MAX_CALL_SIGNAL_CIPHERTEXT_BYTES: usize = 48 * 1024;
 const MAX_WS_MESSAGE_BYTES: usize = 96 * 1024;
 const MAX_WS_FRAME_BYTES: usize = 32 * 1024;
+/// One page of history is 50 messages; this leaves room for a device that has
+/// been offline a while without letting a client send an unbounded array.
+const MAX_DELIVERY_RECEIPT_BATCH: usize = 500;
 
 /// Who should receive an event.
 ///
@@ -142,6 +145,15 @@ struct TypingInput {
 struct ReadReceiptInput {
     conversation_id: Uuid,
     message_id: Uuid,
+}
+
+/// Delivery is acknowledged in batches: a device that has been offline can come
+/// back holding a whole backlog, and one round trip per message would be a
+/// pointless burst of traffic at exactly the worst moment.
+#[derive(Deserialize)]
+struct DeliveryReceiptInput {
+    conversation_id: Uuid,
+    message_ids: Vec<Uuid>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -332,6 +344,8 @@ async fn process_socket_event(
         "message.schedule" => ("ws-schedule", 12, Duration::from_secs(60 * 60)),
         "typing.start" | "typing.stop" => ("ws-typing", 20, Duration::from_secs(10)),
         "receipt.read" => ("ws-receipt", 60, Duration::from_secs(60)),
+        // Batched, so the ceiling is on sweeps rather than on messages.
+        "receipt.delivered" => ("ws-delivery-receipt", 60, Duration::from_secs(60)),
         // Every call signal is opaque to the relay and bound to a short-lived call.
         "call.offer" => ("ws-call-offer", 4, Duration::from_secs(60)),
         "call.answer" => ("ws-call-answer", 8, Duration::from_secs(60)),
@@ -366,6 +380,52 @@ async fn process_socket_event(
                     "username": user.username,
                 }),
             );
+            Ok(())
+        }
+        "receipt.delivered" => {
+            let input: DeliveryReceiptInput = deserialize_payload(event.payload)?;
+            if input.message_ids.is_empty() {
+                return Ok(());
+            }
+            if input.message_ids.len() > MAX_DELIVERY_RECEIPT_BATCH {
+                return Err(ApiError::BadRequest(
+                    "Too many delivery receipts in one batch.".into(),
+                ));
+            }
+            let peer = require_participant(&state.db, input.conversation_id, user.id).await?;
+
+            // Only the recipient can mark delivery, only once, and only within a
+            // conversation they belong to. `sender_id <> $2` is what stops an
+            // account confirming delivery of its own messages.
+            let delivered: Vec<Uuid> = sqlx::query_scalar(
+                r#"
+                UPDATE messages
+                SET delivered_at = NOW()
+                WHERE id = ANY($1)
+                  AND conversation_id = $3
+                  AND sender_id <> $2
+                  AND delivered_at IS NULL
+                RETURNING id
+                "#,
+            )
+            .bind(&input.message_ids)
+            .bind(user.id)
+            .bind(input.conversation_id)
+            .fetch_all(&state.db)
+            .await?;
+
+            if !delivered.is_empty() {
+                publish(
+                    state,
+                    EventTarget::User(peer),
+                    "receipt.delivered",
+                    json!({
+                        "conversation_id": input.conversation_id,
+                        "message_ids": delivered,
+                        "user_id": user.id,
+                    }),
+                );
+            }
             Ok(())
         }
         "receipt.read" => {
@@ -596,7 +656,8 @@ async fn send_message(
         r#"
         INSERT INTO messages (conversation_id, sender_id, envelope_version, nonce, ciphertext)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, conversation_id, sender_id, envelope_version, nonce, ciphertext, created_at
+        RETURNING id, conversation_id, sender_id, envelope_version, nonce, ciphertext, created_at,
+                  delivered_at, NULL::timestamptz AS read_at
         "#,
     )
     .bind(input.conversation_id)
@@ -733,7 +794,8 @@ pub async fn deliver_due_scheduled_messages(state: &AppState) -> Result<(), ApiE
         let row = sqlx::query_as::<_, MessageRow>(
             r#"INSERT INTO messages (conversation_id, sender_id, envelope_version, nonce, ciphertext)
                VALUES ($1, $2, $3, $4, $5)
-               RETURNING id, conversation_id, sender_id, envelope_version, nonce, ciphertext, created_at"#,
+               RETURNING id, conversation_id, sender_id, envelope_version, nonce, ciphertext, created_at,
+                  delivered_at, NULL::timestamptz AS read_at"#,
         )
         .bind(scheduled.conversation_id)
         .bind(scheduled.sender_id)

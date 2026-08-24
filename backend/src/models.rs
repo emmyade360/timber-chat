@@ -231,6 +231,10 @@ pub struct MessageRow {
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,
     pub created_at: DateTime<Utc>,
+    /// When the recipient's device confirmed it holds the ciphertext.
+    pub delivered_at: Option<DateTime<Utc>>,
+    /// When the recipient opened it. Always at or after `delivered_at`.
+    pub read_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -242,6 +246,10 @@ pub struct StoredMessage {
     pub nonce: String,
     pub ciphertext: String,
     pub created_at: DateTime<Utc>,
+    /// Receipt state travels with history so a sender that reloads sees the
+    /// same ticks it saw before, rather than dropping back to one.
+    pub delivered_at: Option<DateTime<Utc>>,
+    pub read_at: Option<DateTime<Utc>>,
 }
 
 impl From<MessageRow> for StoredMessage {
@@ -254,6 +262,8 @@ impl From<MessageRow> for StoredMessage {
             nonce: BASE64.encode(&row.nonce),
             ciphertext: BASE64.encode(&row.ciphertext),
             created_at: row.created_at,
+            delivered_at: row.delivered_at,
+            read_at: row.read_at,
         }
     }
 }

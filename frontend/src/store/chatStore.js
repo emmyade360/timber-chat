@@ -93,14 +93,21 @@ export const useChatStore = create((set, get) => ({
       return { onlineUsers: next };
     }),
 
-  markRead: (messageIds) =>
+  /**
+   * Stamp a receipt on messages this device sent. `field` is `deliveredAt` or
+   * `readAt`; read implies delivery, so it fills both.
+   */
+  markReceipt: (messageIds, field, at = Date.now()) =>
     set((state) => {
       const ids = new Set(messageIds);
       const messages = {};
       for (const [conversationId, list] of Object.entries(state.messages)) {
-        messages[conversationId] = list.map((message) =>
-          ids.has(message.id) ? { ...message, readByPeer: true } : message,
-        );
+        messages[conversationId] = list.map((message) => {
+          if (!ids.has(message.id) || message[field]) return message;
+          const next = { ...message, [field]: at };
+          if (field === "readAt" && !next.deliveredAt) next.deliveredAt = at;
+          return next;
+        });
       }
       return { messages };
     }),

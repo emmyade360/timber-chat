@@ -124,15 +124,18 @@ body {
 }
 .glass-panel {
   position: relative;
-  background: var(--glass-bg);
+  background:
+    repeating-linear-gradient(93deg, rgba(139,94,60,0.05) 0 1px, transparent 1px 11px),
+    linear-gradient(168deg, rgba(245,230,208,0.11), rgba(245,230,208,0.04));
   border: 1px solid var(--glass-border);
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border-radius: var(--radius-lg);
   box-shadow:
-    0 8px 32px rgba(0,0,0,0.45),
-    inset 0 1px 0 var(--glass-shine),
-    inset 0 -1px 0 rgba(0,0,0,0.2);
+    0 16px 40px -12px rgba(0,0,0,0.72),
+    0 2px 0 rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,240,210,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
 }
 .glass-panel-dark {
   background: rgba(20, 10, 4, 0.45);
@@ -140,22 +143,41 @@ body {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
+/* Raised, lit from above, and seated on a dark edge. `translateY` on :active
+   moves the face down onto that edge, so pressing reads as physical rather
+   than as a colour change. */
 .btn-wood {
+  position: relative;
   min-height: 44px;
   padding: 12px 24px;
-  background: linear-gradient(135deg, var(--wood-warm) 0%, var(--wood-mid) 100%);
-  border: 1px solid var(--wood-light);
+  background:
+    repeating-linear-gradient(92deg, rgba(44,26,14,0.12) 0 1px, transparent 1px 8px),
+    linear-gradient(180deg, #A9713F 0%, #8B5E3C 46%, #6E421F 100%);
+  border: 1px solid #C49A6C;
   border-radius: var(--radius-sm);
   color: var(--wood-cream);
   font-family: var(--font-display);
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.03em;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 16px rgba(92,51,23,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+  transition: transform 0.11s ease, box-shadow 0.11s ease, filter 0.18s ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255,238,214,0.4),
+    inset 0 -2px 0 rgba(0,0,0,0.35),
+    0 3px 0 #4A2C18,
+    0 7px 16px -4px rgba(0,0,0,0.6);
 }
-.btn-wood:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-wood:hover:not(:disabled) { filter: brightness(1.07); }
+.btn-wood:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow:
+    inset 0 2px 5px rgba(0,0,0,0.45),
+    inset 0 -1px 0 rgba(255,238,214,0.12),
+    0 0 0 #4A2C18;
+}
+.btn-wood:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: inset 0 1px 0 rgba(255,238,214,0.2), 0 2px 0 #4A2C18; }
 .btn-ghost {
   min-height: 44px;
   padding: 12px 24px;
@@ -188,7 +210,9 @@ body {
 .field-group { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 13px; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; }
 .splash {
-  height: 100vh;
+  position: relative;
+  z-index: 1;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -196,26 +220,12 @@ body {
   gap: 20px;
   background: var(--wood-dark);
 }
-.splash-knot { position: relative; width: 56px; height: 56px; }
+.splash .together-frame { width: min(86vw, 20rem); }
 .splash-text {
   font-family: var(--font-display);
   font-size: 28px;
   color: var(--wood-pale);
   letter-spacing: 0.1em;
-}
-.knot-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 3px solid transparent;
-  border-top-color: var(--accent);
-  animation: spin 1s linear infinite;
-}
-.knot-ring--2 {
-  inset: 8px;
-  border-top-color: var(--wood-light);
-  animation-duration: 0.7s;
-  animation-direction: reverse;
 }
 .empty-state {
   flex: 1;
@@ -243,7 +253,6 @@ body {
   flex-shrink: 0;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -371,11 +380,18 @@ body {
 
 /* ─── tab bar ─────────────────────────────────────────────── */
 
+/* A milled rail, not a flat strip: a lit top edge and a dark body make the
+   screen above it read as sitting higher than the navigation. */
 .tab-bar {
   display: flex;
-  border-top: 1px solid var(--glass-border);
-  background: rgba(28, 16, 8, 0.86);
+  border-top: 1px solid rgba(196,154,108,0.34);
+  background:
+    repeating-linear-gradient(92deg, rgba(139,94,60,0.06) 0 1px, transparent 1px 9px),
+    linear-gradient(180deg, #3A2110 0%, #1C1008 100%);
   backdrop-filter: blur(20px);
+  box-shadow:
+    inset 0 1px 0 rgba(232,201,154,0.2),
+    0 -8px 20px -10px rgba(0,0,0,0.85);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -392,8 +408,12 @@ body {
   border: none;
   cursor: pointer;
   color: var(--text-faint);
-  transition: color 0.18s ease;
+  transition: color 0.18s ease, transform 0.14s ease;
 }
+
+.tab:active { transform: translateY(1px); }
+.tab-icon { transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+.tab--active .tab-icon { transform: translateY(-2px) scale(1.09); }
 
 .tab--active { color: var(--wood-pale); }
 
@@ -423,6 +443,201 @@ body {
   font-size: 11px;
   font-weight: 700;
   line-height: 17px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   WOOD FRAME — the carved edge shared by the mark and the panels.
+   A bevel is four light sources at once: a lit top edge, a shaded
+   bottom edge, a dark seat under the piece, and a soft inner glow
+   where the grain catches. Declaring it once keeps every raised
+   surface in the app lit from the same direction.
+   ═══════════════════════════════════════════════════════════ */
+
+.wood-frame {
+  position: relative;
+  padding: var(--frame-pad, 14px);
+  border-radius: var(--radius-lg);
+  background:
+    repeating-linear-gradient(94deg, rgba(44,26,14,0.35) 0 1px, transparent 1px 9px),
+    linear-gradient(150deg, #7A4A24 0%, #5C3317 38%, #3E2415 100%);
+  box-shadow:
+    inset 0 2px 0 rgba(232,201,154,0.32),
+    inset 0 -2px 0 rgba(0,0,0,0.45),
+    inset 2px 0 0 rgba(196,154,108,0.14),
+    inset -2px 0 0 rgba(0,0,0,0.3),
+    0 12px 28px -8px rgba(0,0,0,0.7);
+}
+
+/* The routed groove just inside the frame, so the frame reads as carved from
+   one block rather than as a border drawn around a hole. */
+.wood-frame::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--frame-pad, 14px) - 5px);
+  border-radius: calc(var(--radius-lg) - 6px);
+  box-shadow:
+    inset 0 2px 5px rgba(0,0,0,0.55),
+    inset 0 -1px 0 rgba(232,201,154,0.16);
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TOGETHER MARK
+   ═══════════════════════════════════════════════════════════ */
+
+.together { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.together-frame { --frame-pad: 15px; width: min(100%, 21rem); }
+
+.together-stage {
+  position: relative;
+  height: 178px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  perspective: 760px;
+  perspective-origin: 50% 42%;
+  background:
+    repeating-linear-gradient(91deg, rgba(139,94,60,0.05) 0 1px, transparent 1px 7px),
+    radial-gradient(ellipse 62% 26% at 50% 96%, rgba(196,154,108,0.24), transparent 72%),
+    radial-gradient(ellipse 80% 58% at 50% 30%, rgba(212,137,74,0.20), transparent 70%),
+    linear-gradient(175deg, #24140A 0%, #1B0F07 62%, #2A1810 100%);
+  box-shadow: inset 0 3px 12px rgba(0,0,0,0.75);
+}
+
+/* The cast shadow is what actually sells the depth: it tightens and darkens as
+   the pair comes down and together, the way a real shadow does as two objects
+   approach the surface they sit on. */
+.together-ground {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  width: 190px;
+  height: 26px;
+  margin-left: -95px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.62), transparent 70%);
+  filter: blur(3px);
+  animation: togetherGround 9s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+/* The pair shares one slow tilt, so the two logs always agree about where the
+   light is even while they are moving independently. */
+.together-orbit {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  animation: togetherTilt 11s ease-in-out infinite;
+}
+
+.together-log {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 104px;
+  height: 104px;
+  margin: -52px 0 0 -52px;
+  transform-style: preserve-3d;
+}
+
+.together-log--a { animation: togetherDriftA 9s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+.together-log--b { animation: togetherDriftB 9s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
+
+.together-billet {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* Thickness. Each slab sits a little further back and a little darker, which is
+   what turns a flat disc into a turned billet once the scene tilts. */
+.together-slab {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(150deg, #6E421F, #2C1A0E);
+  transform: translateZ(calc(var(--slab) * -3.4px));
+  opacity: calc(1 - (var(--slab) / var(--slabs)) * 0.45);
+}
+
+.together-face { position: absolute; inset: 0; width: 100%; height: 100%; }
+.together-sheen { animation: togetherSheen 9s ease-in-out infinite; }
+
+/* The ring that leaves the join at the moment the two faces touch. */
+.together-seam {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 104px;
+  height: 104px;
+  margin: -52px 0 0 -52px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  animation: togetherSeam 9s ease-out infinite;
+}
+
+.together-seam--late { animation-delay: 0.4s; border-color: var(--wood-pale); }
+
+.together-words { text-align: center; }
+
+.together-motto {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: var(--wood-pale);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.55);
+  animation: fadeUp 0.7s 0.1s ease-out backwards;
+}
+
+.together-caption {
+  margin-top: 5px;
+  max-width: 24rem;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  animation: fadeUp 0.7s 0.28s ease-out backwards;
+}
+
+.together--mark .together-stage { height: 128px; }
+
+/* Apart, then together: the drift is the whole gesture, so it is slow, it
+   overshoots slightly on the way in, and it rests once they have met. */
+@keyframes togetherDriftA {
+  0%      { transform: translateX(-126px) translateZ(-52px) rotateY(38deg) rotateX(10deg) scale(0.88); }
+  44%     { transform: translateX(-56px) translateZ(8px) rotateY(10deg) rotateX(3deg) scale(1); }
+  54%     { transform: translateX(-46px) translateZ(14px) rotateY(1deg) rotateX(0deg) scale(1.015); }
+  84%     { transform: translateX(-49px) translateZ(12px) rotateY(-2deg) rotateX(1deg) scale(1); }
+  100%    { transform: translateX(-126px) translateZ(-52px) rotateY(38deg) rotateX(10deg) scale(0.88); }
+}
+
+@keyframes togetherDriftB {
+  0%      { transform: translateX(126px) translateZ(-64px) rotateY(-38deg) rotateX(-10deg) scale(0.88); }
+  44%     { transform: translateX(56px) translateZ(-18px) rotateY(-10deg) rotateX(-3deg) scale(1); }
+  54%     { transform: translateX(46px) translateZ(-12px) rotateY(-1deg) rotateX(0deg) scale(1.015); }
+  84%     { transform: translateX(49px) translateZ(-14px) rotateY(2deg) rotateX(-1deg) scale(1); }
+  100%    { transform: translateX(126px) translateZ(-64px) rotateY(-38deg) rotateX(-10deg) scale(0.88); }
+}
+
+@keyframes togetherGround {
+  0%, 100% { transform: scaleX(1.16) scaleY(0.7); opacity: 0.4; }
+  54%      { transform: scaleX(0.84) scaleY(1); opacity: 0.85; }
+  84%      { transform: scaleX(0.87) scaleY(0.97); opacity: 0.8; }
+}
+
+@keyframes togetherTilt {
+  0%, 100% { transform: rotateX(13deg) rotateZ(-2.5deg); }
+  50%      { transform: rotateX(6deg) rotateZ(2.5deg); }
+}
+
+@keyframes togetherSheen {
+  0%, 100% { transform: translateX(6px); opacity: 0.08; }
+  50%      { transform: translateX(-6px); opacity: 0.2; }
+}
+
+@keyframes togetherSeam {
+  0%, 46%  { opacity: 0; transform: scale(0.5); }
+  56%      { opacity: 0.75; transform: scale(1); }
+  76%, 100% { opacity: 0; transform: scale(2.1); }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -500,8 +715,15 @@ body {
   width: 46px;
   height: 46px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--wood-warm), var(--wood-mid));
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255,240,210,0.3), transparent 58%),
+    linear-gradient(150deg, var(--wood-warm), var(--wood-mid) 62%, #3E2415);
   border: 1px solid var(--wood-light);
+  box-shadow:
+    inset 0 1px 0 rgba(255,240,210,0.32),
+    inset 0 -2px 4px rgba(0,0,0,0.4),
+    0 3px 7px -2px rgba(0,0,0,0.6);
+  text-shadow: 0 1px 0 rgba(0,0,0,0.45);
   color: var(--wood-cream);
   font-family: var(--font-display);
   font-size: 19px;
@@ -648,11 +870,16 @@ body {
 .bubble-row--mine { justify-content: flex-end; }
 
 .bubble {
+  position: relative;
   max-width: min(72%, 30rem);
   padding: 7px 10px 6px;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
-  animation: bubble 0.2s ease-out;
+  box-shadow:
+    0 6px 14px -6px rgba(0,0,0,0.62),
+    inset 0 1px 0 rgba(255,240,210,0.14),
+    inset 0 -1px 0 rgba(0,0,0,0.22);
+  animation: bubblePop 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.25);
   word-break: break-word;
 }
 
@@ -690,7 +917,33 @@ body {
   color: var(--text-faint);
 }
 
-.bubble-tick { font-size: 10px; }
+/* Ticks overlap into one glyph-like cluster rather than sitting as separate
+   marks, so two and three read at a glance at this size. The third tick is the
+   accent colour, which is the only place read state is coloured. */
+.bubble-tick {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  color: var(--text-faint);
+  transition: color 0.24s ease;
+}
+
+.bubble-tick svg { width: 11px; height: 11px; }
+.bubble-tick svg + svg { margin-left: -6px; }
+
+.bubble-tick--2 { color: var(--wood-light); }
+.bubble-tick--3 { color: var(--accent); }
+
+/* The moment a receipt lands is worth a beat: the new tick draws itself in. */
+.bubble-tick--2 svg:last-child,
+.bubble-tick--3 svg:last-child { animation: tickIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.3); }
+
+.bubble-tick--pending { font-size: 11px; animation: pulse 1.4s ease-in-out infinite; }
+
+@keyframes tickIn {
+  from { opacity: 0; transform: translateX(-3px) scale(0.7); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
 
 .typing-bubble { display: flex; gap: 4px; padding: 13px; }
 .typing-bubble span {
@@ -912,7 +1165,20 @@ body {
 .stat-value { font-family: var(--font-display); font-size: 20px; color: var(--wood-pale); }
 .stat-label { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-faint); }
 
-.panel { margin: 0 16px 18px; padding: 16px; border-radius: var(--radius-md); background: rgba(245,230,208,0.04); border: 1px solid var(--glass-border); }
+.panel {
+  position: relative;
+  margin: 0 16px 18px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background:
+    repeating-linear-gradient(93deg, rgba(139,94,60,0.045) 0 1px, transparent 1px 11px),
+    linear-gradient(168deg, rgba(245,230,208,0.07), rgba(245,230,208,0.025));
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    0 10px 24px -10px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,240,210,0.16),
+    inset 0 -1px 0 rgba(0,0,0,0.28);
+}
 .panel-note { font-size: 13px; line-height: 1.55; color: var(--text-muted); margin-bottom: 10px; }
 
 .earn-list { list-style: none; display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
@@ -984,7 +1250,6 @@ body {
 .unlock-card { align-items: center; text-align: center; }
 
 .onboard-logo { display: flex; flex-direction: column; align-items: center; gap: 3px; margin-bottom: 6px; }
-.onboard-logo-icon { font-size: 42px; }
 .onboard-brand { font-family: var(--font-display); font-size: 34px; font-weight: 700; color: var(--wood-pale); }
 .onboard-tagline { font-style: italic; font-size: 14px; color: var(--text-muted); }
 .onboard-title { font-family: var(--font-display); font-size: 22px; color: var(--wood-pale); }
@@ -1379,4 +1644,22 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Everything above is decoration. Anyone who has asked their system for less
+   motion gets the same layout with the movement removed -- the mark still
+   shows the two logs together, it just stops travelling there. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .together-log--a { transform: translateX(-49px) translateZ(12px); }
+  .together-log--b { transform: translateX(49px) translateZ(-14px); }
+  .together-orbit { transform: rotateX(10deg); }
+  .together-ground { transform: scaleX(0.87); opacity: 0.8; }
+  .together-seam { display: none; }
 }

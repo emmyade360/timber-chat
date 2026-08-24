@@ -342,7 +342,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
               {message.undecryptable ? <span className="bubble-undecryptable">{message.reason === "waiting-for-key" ? "Waiting for this contact's key…" : "This message could not be decrypted."}</span> : message.deleted ? <span className="bubble-undecryptable">This message was deleted for everyone.</span> : message.expired ? <span className="bubble-undecryptable">This postcard has expired.</span> : <MessageContent message={message} replied={replied} onDownload={downloadAttachment} onVote={(value) => sendControl(payloads.decisionVote(message.id, value))} />}
               {message.pinned && <span className="message-pin">📌 Pinned</span>}
               {Object.entries(message.reactions ?? {}).map(([emoji, people]) => <span className="reaction" key={emoji}>{emoji} {people.length}</span>)}
-              <span className="bubble-meta">{message.payload?.scheduled_at && message.pending ? `Scheduled ${new Date(message.payload.scheduled_at).toLocaleString()} · ` : ""}{timeAgo(message.createdAt)}{mine && <span className="bubble-tick">{message.pending ? "🕓" : message.readByPeer ? "✓✓" : "✓"}</span>}</span>
+              <span className="bubble-meta">{message.payload?.scheduled_at && message.pending ? `Scheduled ${new Date(message.payload.scheduled_at).toLocaleString()} · ` : ""}{timeAgo(message.createdAt)}{mine && <Receipt message={message} />}</span>
               {!message.undecryptable && !message.deleted && !message.expired && <div className="message-tools">
                 <button onClick={() => setReplyTo(message)} aria-label="Reply">↩</button>
                 <button onClick={() => sendControl(payloads.reaction(message.id, "❤️"))} aria-label="React with heart">♥</button>
@@ -370,6 +370,35 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
       {showSafety && <div className="modal-backdrop" onClick={() => setShowSafety(false)}><div className="modal glass-panel" onClick={(event) => event.stopPropagation()}><h3 className="modal-title">Contact safety number</h3><p className="panel-note">Compare this number with @{conversation?.peerUsername} in person or over another trusted channel.</p><code className="safety-number">{safetyNumber}</code><div className="safety-qr" aria-label="Safety number QR code"><QRCodeSVG value={`timber-safety/v1:${conversation.peerId}:${safetyNumber.replaceAll(" ", "")}`} size={156} includeMargin /></div>{verified ? <p className="field-ok">You marked this contact as verified on this device.</p> : <button className="btn-wood btn-block" onClick={async () => { await setMeta(`safety:${conversation.peerId}`, { verifiedAt: Date.now() }); setVerified(true); }}>Numbers match</button>}<button className="btn-ghost btn-block" onClick={() => setShowSafety(false)}>Done</button></div></div>}
       {savedOpen && <div className="modal-backdrop" onClick={() => setSavedOpen(false)}><div className="modal glass-panel" onClick={(event) => event.stopPropagation()}><h3 className="modal-title">Saved messages</h3>{savedEntries.length ? <div className="saved-list">{savedEntries.map((message) => <p key={message.id}>{labelForPayload(message.payload)}</p>)}</div> : <p className="panel-note">No saved messages on this device yet.</p>}<p className="panel-note">Saved messages are encrypted and private to this device.</p><button className="btn-ghost btn-block" onClick={() => setSavedOpen(false)}>Done</button></div></div>}
     </div>
+  );
+}
+
+/**
+ * The three states a sent message can be in, as one, two, or three ticks.
+ *
+ * Sent means the relay stored it; delivered means the other device confirmed it
+ * holds the ciphertext; read means they opened the conversation. A message to
+ * someone who is offline sits at one tick until they reconnect, which is the
+ * honest thing to show -- the relay holding it is not the same as it arriving.
+ */
+function Receipt({ message }) {
+  if (message.pending) {
+    return <span className="bubble-tick bubble-tick--pending" title="Not sent yet" aria-label="Not sent yet">◌</span>;
+  }
+  const ticks = message.readAt ? 3 : message.deliveredAt ? 2 : 1;
+  const label = ticks === 3 ? "Read" : ticks === 2 ? "Delivered" : "Sent";
+  return (
+    <span
+      className={`bubble-tick bubble-tick--${ticks}`}
+      title={label}
+      aria-label={label}
+    >
+      {Array.from({ length: ticks }, (_, index) => (
+        <svg key={index} viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M1.4 6.4 4.2 9.2 10.6 2.8" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ))}
+    </span>
   );
 }
 

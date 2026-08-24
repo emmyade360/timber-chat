@@ -10,7 +10,8 @@ import { createWebSocketTicket, getToken } from "../lib/api.js";
 import { signIn } from "../lib/auth.js";
 import { currentIdentity, isUnlocked } from "../crypto/session.js";
 import { useChatStore } from "../store/chatStore.js";
-import { markConversationRead, receiveMessage, reconcileRealtime } from "../lib/sync.js";
+import { acknowledgeDelivery, markConversationRead, receiveMessage, reconcileRealtime } from "../lib/sync.js";
+import { markReceipt } from "../db/localStore.js";
 import { getCurrentUser, getFriends } from "../lib/api.js";
 import { notifyIncoming } from "../lib/notifications.js";
 
@@ -94,9 +95,9 @@ export function useWebSocket(enabled) {
         setConnected(true);
         // Covers messages and relationships that changed while this tab was
         // offline, sleeping, or connected to another API instance.
-        reconcileRealtime().catch(() => {});
+        reconcileRealtime(send).catch(() => {});
         reconcileTimer = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) reconcileRealtime().catch(() => {});
+          if (socket.readyState === WebSocket.OPEN) reconcileRealtime(send).catch(() => {});
         }, 30_000);
       };
 
@@ -118,6 +119,9 @@ export function useWebSocket(enabled) {
           case "message.new":
             {
               const received = await receiveMessage(payload);
+              if (received && !received.mine) {
+                await acknowledgeDelivery(payload.conversation_id, send);
+              }
               if (received) await notifyIncoming({
                 ...received,
                 conversationId: payload.conversation_id,
@@ -143,8 +147,13 @@ export function useWebSocket(enabled) {
           case "presence.offline":
             store.setUserOnline(payload.user_id, false);
             break;
+          case "receipt.delivered":
+            store.markReceipt(payload.message_ids ?? [], "deliveredAt");
+            await markReceipt(payload.message_ids ?? [], "deliveredAt");
+            break;
           case "receipt.read":
-            store.markRead([payload.message_id]);
+            store.markReceipt([payload.message_id], "readAt");
+            await markReceipt([payload.message_id], "readAt");
             break;
           case "call.offer":
           case "call.answer":
@@ -213,7 +222,9 @@ export function useWebSocket(enabled) {
       socketRef.current = null;
       setConnected(false);
     };
-  }, [enabled]);
+    // `send` is a stable useCallback with no dependencies, so listing it keeps
+    // the lint honest without ever re-opening the socket.
+  }, [enabled, send]);
 
   /** Tell the sender we read their messages, and clear our own badge. */
   const acknowledge = useCallback(

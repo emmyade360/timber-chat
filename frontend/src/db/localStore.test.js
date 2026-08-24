@@ -77,10 +77,14 @@ describe("encryption at rest", () => {
     expect(Object.keys(raw).sort()).toEqual([
       "conversationId",
       "createdAt",
+      // Receipt timestamps: when the peer's device took the ciphertext and when
+      // they opened it. Both are metadata about transit, never about content.
+      "deliveredAt",
       "envelope",
       "id",
       "pending",
       "read",
+      "readAt",
       "senderId",
     ]);
   });

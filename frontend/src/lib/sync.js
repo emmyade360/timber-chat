@@ -21,12 +21,14 @@ import {
   deletePeer,
   getConversation,
   listConversations,
+  markAcknowledged,
   markRead as markReadLocally,
   messagesFor,
   presentMessages,
   putMessage,
   putPeer,
   PeerKeyVerificationError,
+  unacknowledgedMessageIds,
   unreadCount,
   upsertConversation,
 } from "../db/localStore.js";
@@ -99,6 +101,8 @@ export async function backfill(conversationId) {
         createdAt,
         envelope: message,
         read: false,
+        deliveredAt: message.delivered_at ? toMillis(message.delivered_at) : null,
+        readAt: message.read_at ? toMillis(message.read_at) : null,
       });
       stored += 1;
     }
@@ -108,6 +112,26 @@ export async function backfill(conversationId) {
   return stored;
 }
 
+/**
+ * Tell each sender which of their messages this device now holds.
+ *
+ * This is the half of the receipt that the sender sees as a second tick. It
+ * runs over the whole conversation rather than per arrival, because the case
+ * that matters is a device that was offline: the messages were stored during
+ * backfill, not received live, so there was never a moment to acknowledge them
+ * one at a time.
+ */
+export async function acknowledgeDelivery(conversationId, send) {
+  if (!send) return 0;
+  const selfId = currentIdentity().userId;
+  const ids = await unacknowledgedMessageIds(conversationId, selfId);
+  if (!ids.length) return 0;
+  if (!send("receipt.delivered", { conversation_id: conversationId, message_ids: ids })) return 0;
+  // Only once the socket accepted it; otherwise the next sweep retries.
+  await markAcknowledged(ids);
+  return ids.length;
+}
+
 let reconciliation = null;
 
 /**
@@ -115,11 +139,13 @@ let reconciliation = null;
  * It is coalesced so reconnect, an incoming event, and app bootstrap never race
  * through competing history downloads.
  */
-export function reconcileRealtime() {
+export function reconcileRealtime(send = null) {
   reconciliation ??= (async () => {
     const conversations = await syncConversations({ reconcile: true });
     await Promise.all(conversations.map((conversation) => backfill(conversation.id)));
     await refreshConversationList();
+    // After the backlog has landed, tell the senders it arrived.
+    await Promise.all(conversations.map((conversation) => acknowledgeDelivery(conversation.id, send)));
     return conversations;
   })().finally(() => { reconciliation = null; });
   return reconciliation;

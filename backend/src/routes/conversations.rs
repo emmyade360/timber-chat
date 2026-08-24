@@ -89,11 +89,17 @@ pub async fn get_messages(
 
     let mut rows = sqlx::query_as::<_, MessageRow>(
         r#"
-        SELECT id, conversation_id, sender_id, envelope_version, nonce, ciphertext, created_at
-        FROM messages
-        WHERE conversation_id = $1
-          AND ($2::timestamptz IS NULL OR created_at < $2)
-        ORDER BY created_at DESC
+        SELECT m.id, m.conversation_id, m.sender_id, m.envelope_version, m.nonce,
+               m.ciphertext, m.created_at, m.delivered_at,
+               (
+                   SELECT r.created_at FROM read_receipts r
+                   WHERE r.message_id = m.id AND r.user_id <> m.sender_id
+                   LIMIT 1
+               ) AS read_at
+        FROM messages m
+        WHERE m.conversation_id = $1
+          AND ($2::timestamptz IS NULL OR m.created_at < $2)
+        ORDER BY m.created_at DESC
         LIMIT $3
         "#,
     )

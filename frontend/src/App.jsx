@@ -20,6 +20,7 @@ import Explore from "./screens/Explore/Explore.jsx";
 import Profile from "./screens/Profile/Profile.jsx";
 import Settings from "./screens/Me/Me.jsx";
 import LevelBadge from "./components/Level/LevelBadge.jsx";
+import TogetherMark from "./components/Together/TogetherMark.jsx";
 import InvitePanel from "./components/Invite/InvitePanel.jsx";
 import CallOverlay from "./components/Call/CallOverlay.jsx";
 import InstallTimberPrompt from "./components/Install/InstallTimberPrompt.jsx";
@@ -75,10 +76,8 @@ export default function App() {
   if (phase === "loading") {
     return (
       <div className="splash">
-        <div className="splash-knot">
-          <div className="knot-ring" />
-          <div className="knot-ring knot-ring--2" />
-        </div>
+        <div className="wood-grain-overlay" />
+        <TogetherMark variant="mark" />
         <p className="splash-text">Timber</p>
       </div>
     );

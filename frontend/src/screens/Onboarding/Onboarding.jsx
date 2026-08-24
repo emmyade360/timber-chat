@@ -12,6 +12,7 @@ import { openSession } from "../../crypto/session.js";
 import { hasAccount, register, signIn } from "../../lib/auth.js";
 import { inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import TogetherMark from "../../components/Together/TogetherMark.jsx";
 
 const CONFIRM_COUNT = 3;
 
@@ -174,7 +175,8 @@ export default function Onboarding({ onReady }) {
 function Welcome({ onCreate, onImport, onTransfer }) {
   return (
     <>
-      <Logo />
+      <Logo tagline={false} />
+      <TogetherMark />
       <p className="onboard-lede">
         Your account is a phrase of twelve words. It lives on your device, never on our
         servers, and it is the only key to your conversations.
@@ -463,12 +465,11 @@ function SetPin({ onSubmit, onBack, busy, error }) {
   );
 }
 
-function Logo() {
+function Logo({ tagline = true }) {
   return (
     <div className="onboard-logo">
-      <span className="onboard-logo-icon">🪵</span>
       <h1 className="onboard-brand">Timber</h1>
-      <p className="onboard-tagline">where conversations grow</p>
+      {tagline && <p className="onboard-tagline">where conversations grow</p>}
     </div>
   );
 }

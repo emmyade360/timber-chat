@@ -211,6 +211,7 @@ export async function openCallSignal(conversationId, senderId, envelope) {
  */
 export async function putMessage(message) {
   const db = await timberDb();
+  const existing = await db.get(STORE_MESSAGES, message.id);
   const record = {
     id: message.id,
     conversationId: message.conversationId,
@@ -218,6 +219,11 @@ export async function putMessage(message) {
     createdAt: message.createdAt,
     pending: message.pending ? 1 : 0,
     read: message.read ? 1 : 0,
+    // Receipts only ever move forward. Re-storing a message during a backfill
+    // must not walk three ticks back to one because this page of history was
+    // fetched before the peer opened it.
+    deliveredAt: message.deliveredAt ?? existing?.deliveredAt ?? null,
+    readAt: message.readAt ?? existing?.readAt ?? null,
     envelope: message.envelope,
   };
   await db.put(STORE_MESSAGES, record);
@@ -350,6 +356,8 @@ function decryptRecord(record, conversationId, key) {
     conversationId: record.conversationId,
     senderId: record.senderId,
     createdAt: record.createdAt,
+    deliveredAt: record.deliveredAt ?? null,
+    readAt: record.readAt ?? null,
     pending: record.pending === 1,
     read: record.read === 1,
   };
@@ -431,6 +439,65 @@ export async function markRead(conversationId) {
   }
   await tx.done;
   return marked;
+}
+
+/**
+ * Stamp a receipt on messages this device sent.
+ *
+ * `field` is `deliveredAt` or `readAt`. Read implies delivery, so marking a
+ * message read backfills delivery too: a receipt pair that arrived out of
+ * order must never leave a message showing three ticks with no second state.
+ */
+export async function markReceipt(messageIds, field, at = Date.now()) {
+  const db = await timberDb();
+  const tx = db.transaction(STORE_MESSAGES, "readwrite");
+  const changed = [];
+  for (const id of messageIds) {
+    const record = await tx.store.get(id);
+    if (!record || record[field]) continue;
+    const next = { ...record, [field]: at };
+    if (field === "readAt" && !next.deliveredAt) next.deliveredAt = at;
+    await tx.store.put(next);
+    changed.push(id);
+  }
+  await tx.done;
+  return changed;
+}
+
+/**
+ * Messages from the peer that this device holds but has never acknowledged.
+ *
+ * This is what turns the sender's single tick into two after the recipient
+ * comes back online: the backlog is swept once the socket is up, rather than
+ * relying on each message having been acknowledged as it arrived.
+ */
+export async function unacknowledgedMessageIds(conversationId, selfId, limit = 500) {
+  const db = await timberDb();
+  const range = IDBKeyRange.bound(
+    [conversationId, Number.MIN_SAFE_INTEGER],
+    [conversationId, Number.MAX_SAFE_INTEGER],
+  );
+  const ids = [];
+  let cursor = await db.transaction(STORE_MESSAGES).store.index("byConversation").openCursor(range);
+  while (cursor && ids.length < limit) {
+    const record = cursor.value;
+    if (record.senderId !== selfId && record.pending === 0 && !record.acknowledged) {
+      ids.push(record.id);
+    }
+    cursor = await cursor.continue();
+  }
+  return ids;
+}
+
+/** Remember that the relay accepted our delivery receipt, so we stop resending. */
+export async function markAcknowledged(messageIds) {
+  const db = await timberDb();
+  const tx = db.transaction(STORE_MESSAGES, "readwrite");
+  for (const id of messageIds) {
+    const record = await tx.store.get(id);
+    if (record && !record.acknowledged) await tx.store.put({ ...record, acknowledged: 1 });
+  }
+  await tx.done;
 }
 
 /** Messages awaiting delivery, oldest first, for the reconnect outbox. */
