@@ -88,21 +88,22 @@ export default function People({ onOpenConversation }) {
 
   return (
     <div className="screen">
-      <header className="screen-header">
-        <h1 className="screen-title">People</h1>
-      </header>
-
-      <div className="search-wrap">
-        <input
-          className="glass-input"
-          type="search"
-          placeholder="Find new people by username…"
-          aria-label="Find new people by username"
-          autoCapitalize="none"
-          spellCheck="false"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+      <div className="screen-toolbar">
+        <header className="screen-header">
+          <h1 className="screen-title">People</h1>
+        </header>
+        <div className="search-wrap">
+          <input
+            className="glass-input"
+            type="search"
+            placeholder="Find new people by username…"
+            aria-label="Find new people by username"
+            autoCapitalize="none"
+            spellCheck="false"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
       </div>
 
       {me && <ContactExchange onAdd={async (id) => { await sendFriendRequest(id); await refresh(); }} />}

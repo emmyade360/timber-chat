@@ -1,5 +1,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Crimson+Pro:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
+/* Predictable sizing prevents browser defaults from creating overflow or a
+   margin around the full-height application shell. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  min-height: 100%;
+  background: #2C1A0E;
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body, #root {
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+}
+
+body { min-height: 100dvh; overflow-x: hidden; }
+button, input, textarea, select { min-width: 0; font: inherit; }
+button { touch-action: manipulation; }
+img, svg, video, canvas { display: block; max-width: 100%; }
+
+:focus-visible {
+  outline: 3px solid var(--wood-pale);
+  outline-offset: 3px;
+}
+
 :root {
   --wood-dark:    #2C1A0E;
   --wood-mid:     #5C3317;
@@ -81,6 +109,7 @@ body {
   -webkit-backdrop-filter: blur(16px);
 }
 .btn-wood {
+  min-height: 44px;
   padding: 12px 24px;
   background: linear-gradient(135deg, var(--wood-warm) 0%, var(--wood-mid) 100%);
   border: 1px solid var(--wood-light);
@@ -96,6 +125,7 @@ body {
 }
 .btn-wood:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-ghost {
+  min-height: 44px;
   padding: 12px 24px;
   background: transparent;
   border: 1px solid var(--glass-border);
@@ -157,6 +187,8 @@ body {
 }
 .empty-state {
   flex: 1;
+  min-width: 0;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -166,7 +198,7 @@ body {
 }
 .empty-icon { font-size: 56px; }
 .empty-title { font-family: var(--font-display); font-size: 24px; color: var(--wood-pale); }
-.empty-sub { font-size: 15px; }
+.empty-sub { max-width: 34rem; font-size: 15px; line-height: 1.5; text-align: center; }
 .avatar {
   width: 38px; height: 38px;
   border-radius: 50%;
@@ -206,10 +238,11 @@ body {
   overflow: hidden;
 }
 
-.shell-main { flex: 1; min-height: 0; display: flex; }
+.shell-main { flex: 1; min-width: 0; min-height: 0; display: flex; width: 100%; }
 
 .screen {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -227,6 +260,28 @@ body {
   padding: 18px 20px 12px;
   background: linear-gradient(180deg, rgba(44,26,14,0.92) 60%, transparent);
   backdrop-filter: blur(12px);
+}
+
+/* Chats and People keep their discovery controls visible after long lists
+   scroll. The toolbar owns the sticky offset, so it remains correct when the
+   user increases the browser text size. */
+.screen-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex: 0 0 auto;
+  background: linear-gradient(180deg, rgba(44,26,14,0.98) 78%, rgba(44,26,14,0.9));
+  border-bottom: 1px solid rgba(196, 154, 108, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.screen-toolbar .screen-header {
+  position: static;
+  padding-bottom: 8px;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .screen-title {
@@ -281,6 +336,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 3px;
+  min-height: 56px;
   padding: 10px 4px 8px;
   background: none;
   border: none;
@@ -429,7 +485,7 @@ body {
 .explore-bio { min-height: 82px; resize: vertical; }
 .interest-set { margin: 0; padding: 0; border: 0; }
 .interest-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
-.interest-chip { border: 1px solid var(--glass-border); border-radius: 999px; background: transparent; color: var(--text-muted); padding: 5px 10px; font: inherit; font-size: 14px; text-transform: capitalize; cursor: pointer; }
+.interest-chip { min-height: 44px; border: 1px solid var(--glass-border); border-radius: 999px; background: transparent; color: var(--text-muted); padding: 5px 10px; font: inherit; font-size: 14px; text-transform: capitalize; cursor: pointer; }
 .interest-chip--selected { color: var(--wood-cream); border-color: var(--accent); background: rgba(212, 137, 74, 0.18); }
 .interest-chip--static { cursor: default; color: var(--wood-pale); }
 .explore-deck { display: flex; flex-direction: column; gap: 10px; }
@@ -453,6 +509,7 @@ body {
 .chat-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--glass-border);
@@ -460,20 +517,27 @@ body {
   backdrop-filter: blur(16px);
 }
 
-.chat-header-text { display: flex; flex-direction: column; min-width: 0; }
-.chat-header-name { font-family: var(--font-display); font-size: 17px; color: var(--wood-pale); }
+.chat-header-identity { display: flex; flex: 1 1 13rem; align-items: center; min-width: 0; gap: 10px; }
+.chat-header-text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.chat-header-name { overflow: hidden; font-family: var(--font-display); font-size: 17px; color: var(--wood-pale); text-overflow: ellipsis; white-space: nowrap; }
 .chat-header-sub { font-size: 12px; color: var(--text-muted); }
-.chat-header-action { margin-left: auto; padding: 5px; color: var(--wood-pale); background: transparent; border: 0; font-size: 19px; cursor: pointer; }
-.chat-header-action + .chat-header-action { margin-left: 0; }
+.chat-header-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: auto; }
+.chat-header-action { display: grid; width: 44px; height: 44px; padding: 0; place-items: center; color: var(--wood-pale); background: transparent; border: 0; border-radius: 50%; font-size: 19px; cursor: pointer; }
+.chat-header-action:hover { background: rgba(245, 230, 208, 0.08); }
 .chat-header-action:disabled { opacity: .45; cursor: not-allowed; }
 
 .icon-btn {
+  display: grid;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  place-items: center;
   background: none;
   border: none;
   color: var(--wood-pale);
   font-size: 30px;
   line-height: 1;
-  padding: 0 6px;
   cursor: pointer;
 }
 
@@ -486,7 +550,7 @@ body {
 .reaction { display: inline-block; margin: 5px 3px 0 0; padding: 1px 6px; border: 1px solid var(--glass-border); border-radius: 999px; font-size: 12px; }
 .message-tools { display: flex; gap: 4px; margin-top: 6px; opacity: .62; }
 .bubble:hover .message-tools { opacity: 1; }
-.message-tools button { padding: 1px 4px; color: var(--text-muted); background: transparent; border: 0; font-size: 13px; cursor: pointer; }
+.message-tools button { width: 32px; height: 32px; padding: 1px 4px; color: var(--text-muted); background: transparent; border: 0; border-radius: 8px; font-size: 13px; cursor: pointer; }
 .attachment-card { display: block; max-width: 250px; padding: 8px; color: var(--wood-cream); background: rgba(0,0,0,.15); border: 1px solid var(--glass-border); border-radius: 8px; font: inherit; text-align: left; cursor: pointer; }
 .decision-card { display: flex; flex-direction: column; gap: 5px; min-width: 190px; }
 .decision-options { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -494,11 +558,11 @@ body {
 .reply-bar { display: flex; justify-content: space-between; gap: 8px; padding: 6px 14px; color: var(--text-muted); background: rgba(20,10,4,.75); border-top: 1px solid var(--glass-border); font-size: 13px; }
 .reply-bar button { color: var(--wood-pale); background: transparent; border: 0; font-size: 17px; cursor: pointer; }
 .composer-options { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding: 6px 10px; background: rgba(20,10,4,.68); border-top: 1px solid var(--glass-border); }
-.composer-mode { flex: 0 0 auto; padding: 4px 7px; color: var(--text-muted); background: transparent; border: 1px solid var(--glass-border); border-radius: 999px; font: inherit; font-size: 12px; cursor: pointer; }
+.composer-mode { flex: 0 0 auto; min-height: 44px; padding: 4px 10px; color: var(--text-muted); background: transparent; border: 1px solid var(--glass-border); border-radius: 999px; font: inherit; font-size: 12px; cursor: pointer; }
 .composer-mode--on { color: var(--wood-cream); border-color: var(--accent); background: rgba(212,137,74,.15); }
 .composer-schedule { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; color: var(--text-muted); font-size: 12px; }
 .composer-schedule input { max-width: 154px; color-scheme: dark; color: var(--wood-pale); background: transparent; border: 0; font: inherit; font-size: 11px; }
-.composer-attach { flex: 0 0 auto; width: 31px; height: 31px; padding: 0; color: var(--wood-pale); background: transparent; border: 1px solid var(--glass-border); border-radius: 50%; font-size: 18px; cursor: pointer; }
+.composer-attach { flex: 0 0 auto; width: 44px; height: 44px; padding: 0; color: var(--wood-pale); background: transparent; border: 1px solid var(--glass-border); border-radius: 50%; font-size: 18px; cursor: pointer; }
 .composer-attach:disabled { opacity: .45; }
 .composer-attach--recording { color: #ffaaa1; border-color: #ffaaa1; animation: pulse 1s ease infinite; }
 .saved-list { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
@@ -605,7 +669,7 @@ body {
 }
 
 .composer-input { flex: 1; }
-.composer-send { padding: 11px 20px; flex-shrink: 0; }
+.composer-send { padding: 10px 16px; flex-shrink: 0; }
 
 /* ═══════════════════════════════════════════════════════════
    PEOPLE
@@ -659,7 +723,7 @@ body {
   text-align: right;
 }
 
-.btn-sm { padding: 7px 13px; font-size: 13px; }
+.btn-sm { min-height: 44px; padding: 7px 13px; font-size: 13px; }
 
 /* ═══════════════════════════════════════════════════════════
    PROFILE & LEVELS
@@ -833,6 +897,7 @@ body {
 .btn-block { width: 100%; }
 
 .btn-danger {
+  min-height: 44px;
   padding: 12px 24px;
   border-radius: var(--radius-sm);
   background: rgba(160, 60, 45, 0.22);
@@ -1060,4 +1125,117 @@ body {
   margin-top: 12px;
   font-size: 13px;
   color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESPONSIVE AND ACCESSIBLE LAYOUT
+   ═══════════════════════════════════════════════════════════ */
+
+.glass-input { display: block; max-inline-size: 100%; }
+.panel-note, .field-help, .onboard-lede, .onboard-warning, .call-note { overflow-wrap: anywhere; }
+.call-btn { min-height: 44px; }
+.explore-link { min-height: 44px; }
+
+/* Tablets keep the familiar bottom navigation, but do not stretch reading and
+   form content to an uncomfortable line length. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .screen:not(.chat-screen) { width: 100%; max-width: 48rem; margin-inline: auto; }
+  .chat-screen { width: 100%; max-width: 58rem; margin-inline: auto; }
+  .onboard-card { width: min(100%, 34rem); }
+  .modal, .levelup { width: min(100%, 32rem); }
+}
+
+/* The 320–480px range is common for narrow Android phones and split-screen
+   windows. Content reflows instead of relying on horizontal scrolling. */
+@media (max-width: 480px) {
+  .screen-header { padding: 14px 16px 8px; }
+  .screen-title { font-size: 24px; }
+  .search-wrap { padding: 0 12px 10px; }
+  .panel { margin: 0 12px 14px; padding: 14px; }
+  .people-section { padding-inline: 12px; }
+  .people-notice { padding-inline: 12px; }
+  .contact-exchange, .explore-intro, .explore-profile, .explore-deck { margin-inline: 12px; }
+  .profile-hero, .growth-hero { padding-inline: 14px; }
+  .ladder { padding-inline: 12px; }
+
+  .chat-header { gap: 6px; padding: 8px 10px; }
+  .chat-header-identity { flex-basis: 100%; gap: 8px; }
+  .chat-header-actions {
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: 0;
+    margin-left: 0;
+    padding-top: 2px;
+    border-top: 1px solid rgba(196, 154, 108, 0.14);
+  }
+  .message-scroll { padding-inline: 10px; }
+  .bubble { max-width: 88%; }
+  .composer { gap: 6px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
+  .composer-send { padding-inline: 12px; }
+  .composer-options { padding-inline: 8px; }
+  .reply-bar { padding-inline: 10px; }
+
+  .people-row { flex-wrap: wrap; align-items: flex-start; }
+  .people-row > .row-actions {
+    width: calc(100% - 47px);
+    margin-top: -4px;
+    margin-left: 47px;
+  }
+  .people-row > .row-actions--stack { align-items: stretch; max-width: none; }
+  .people-row > .row-actions .btn-sm { flex: 1; }
+  .row-warning { text-align: left; }
+
+  .explore-actions { flex-wrap: wrap; }
+  .explore-link { width: 100%; margin-left: 0; text-align: left; }
+  .invite-link-row { flex-wrap: wrap; }
+  .invite-link-row .invite-link { flex-basis: 100%; }
+  .invite-link-row .btn-sm { flex: 1; }
+  .invite-code-row { flex-wrap: wrap; }
+
+  .phrase-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+  .stat-row { gap: 18px; }
+  .earn-list li { align-items: flex-start; flex-direction: column; gap: 2px; }
+
+  .modal-backdrop, .levelup-backdrop, .call-backdrop { padding: 12px; }
+  .modal, .levelup { max-height: calc(100dvh - 24px); padding: 18px; }
+  .call-panel { padding: 16px; }
+  .call-media { min-height: min(48dvh, 300px); }
+  .call-remote-video { min-height: min(48dvh, 300px); max-height: 48dvh; }
+  .call-local-video { right: 8px; bottom: 8px; min-width: 74px; }
+  .call-actions { width: 100%; }
+  .call-btn { flex: 1 1 8.5rem; }
+  .call-toast { right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); max-width: calc(100vw - 20px); }
+}
+
+@media (max-width: 359px) {
+  .screen-title { font-size: 22px; }
+  .tab { min-height: 52px; padding-inline: 2px; }
+  .tab-icon { font-size: 18px; }
+  .tab-label { font-size: 10px; }
+  .btn-wood, .btn-ghost, .btn-danger { padding-inline: 14px; font-size: 14px; }
+  .chat-header-actions { justify-content: space-around; }
+  .chat-header-action, .icon-btn, .composer-attach { width: 40px; height: 40px; }
+  .bubble { max-width: 92%; padding-inline: 10px; }
+  .phrase-word { font-size: 13px; }
+}
+
+/* Virtual keyboards can make a landscape viewport very short. Keep forms and
+   calls scrollable within the viewport rather than clipping their controls. */
+@media (max-height: 640px) and (orientation: landscape) {
+  .onboard-bg { align-content: start; padding-block: 14px; overflow-y: auto; }
+  .onboard-card { margin-block: 0; }
+  .call-backdrop { align-content: start; overflow-y: auto; }
+  .call-panel { margin-block: 0; }
+  .call-media, .call-remote-video { min-height: 150px; max-height: 42dvh; }
+}
+
+/* Honour platform accessibility settings. No essential state is conveyed by
+   animation, so it is safe to remove motion entirely. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

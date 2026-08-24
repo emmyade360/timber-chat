@@ -302,15 +302,19 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
   return (
     <div className="screen chat-screen">
       <header className="chat-header">
-        <button className="icon-btn" onClick={onBack} aria-label="Back">‹</button>
-        <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
-        <div className="chat-header-text"><span className="chat-header-name">{conversation?.peerUsername}</span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
-        <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">☎</button>
-        <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start low-data video call">▣</button>
-        <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages">★</button>
-        <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"}>{notificationsMuted ? "🔕" : "🔔"}</button>
-        <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation">⌕</button>
-        {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number">{verified ? "🔒" : "🔐"}</button>}
+        <div className="chat-header-identity">
+          <button className="icon-btn" onClick={onBack} aria-label="Back">‹</button>
+          <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
+          <div className="chat-header-text"><span className="chat-header-name">{conversation?.peerUsername}</span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
+        </div>
+        <div className="chat-header-actions" aria-label="Conversation actions">
+          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">☎</button>
+          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">▣</button>
+          <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages">★</button>
+          <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"}>{notificationsMuted ? "🔕" : "🔔"}</button>
+          <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation">⌕</button>
+          {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number">{verified ? "🔒" : "🔐"}</button>}
+        </div>
       </header>
 
       {searchOpen && <div className="chat-search"><input className="glass-input" autoFocus placeholder="Search encrypted messages on this device" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />

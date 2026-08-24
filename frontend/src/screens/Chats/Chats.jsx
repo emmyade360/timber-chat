@@ -21,22 +21,23 @@ export default function Chats({ onOpen, onFindPeople, onInvite }) {
 
   return (
     <div className="screen">
-      <header className="screen-header">
-        <h1 className="screen-title">Chats</h1>
-        {syncing && <span className="sync-dot" title="Syncing" />}
-      </header>
-
-      <div className="search-wrap">
-        <input
-          className="glass-input"
-          type="search"
-          placeholder="Search your friends…"
-          aria-label="Search your chats by friend username"
-          autoCapitalize="none"
-          spellCheck="false"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+      <div className="screen-toolbar">
+        <header className="screen-header">
+          <h1 className="screen-title">Chats</h1>
+          {syncing && <span className="sync-dot" title="Syncing" />}
+        </header>
+        <div className="search-wrap">
+          <input
+            className="glass-input"
+            type="search"
+            placeholder="Search your friends…"
+            aria-label="Search your chats by friend username"
+            autoCapitalize="none"
+            spellCheck="false"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
       </div>
 
       {conversations.length === 0 ? (
