@@ -49,25 +49,42 @@ export default function People({ onOpenConversation }) {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const act = async (id, fn) => {
+  const act = async (id, fn, successMessage = "") => {
     setBusyId(id);
     setNotice("");
     try {
-      await fn();
+      const result = await fn();
       await refresh();
       if (query.trim().length >= 2) setResults((await searchUsers(query.trim())).data);
+      if (successMessage) setNotice(successMessage);
+      return result;
     } catch (error) {
       setNotice(userMessage(error, "Could not update your people list. Please try again."));
+      return null;
     } finally {
       setBusyId(null);
     }
   };
 
-  const accept = (request) =>
-    act(request.id, async () => {
-      await respondToFriendRequest(request.id, true);
+  const accept = async (request) => {
+    const accepted = await act(request.id, async () => {
+      const response = await respondToFriendRequest(request.id, true);
       await reconcileRealtime();
+      return response.data;
     });
+    // Acceptance created this conversation atomically on the server. Opening it
+    // right away makes the next step clear without ever allowing an open DM.
+    if (accepted?.conversation_id) {
+      onOpenConversation(request.user_id, accepted.conversation_id);
+    }
+  };
+
+  const requestFriend = (userId) =>
+    act(
+      userId,
+      () => sendFriendRequest(userId),
+      "Friend request sent. You can chat once they accept.",
+    );
 
   return (
     <div className="screen">
@@ -99,7 +116,7 @@ export default function People({ onOpenConversation }) {
               <SearchAction
                 user={user}
                 busy={busyId === user.id}
-                onAdd={() => act(user.id, () => sendFriendRequest(user.id))}
+                onAdd={() => requestFriend(user.id)}
                 onOpen={() => onOpenConversation(user.id)}
               />
             </Row>
