@@ -1,7 +1,9 @@
 // The home screen: every conversation, most recent first.
 
+import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
 import { timeAgo } from "../../lib/time.js";
+import { filterConversations } from "./chatFilter.js";
 
 function previewText(preview) {
   if (!preview) return "No messages yet";
@@ -14,13 +16,30 @@ function previewText(preview) {
 
 export default function Chats({ onOpen, onFindPeople, onInvite }) {
   const { conversations, unread, onlineUsers, syncing } = useChatStore();
+  const [query, setQuery] = useState("");
+  const visibleConversations = filterConversations(conversations, query);
 
-  if (conversations.length === 0) {
-    return (
-      <div className="screen">
-        <header className="screen-header">
-          <h1 className="screen-title">Chats</h1>
-        </header>
+  return (
+    <div className="screen">
+      <header className="screen-header">
+        <h1 className="screen-title">Chats</h1>
+        {syncing && <span className="sync-dot" title="Syncing" />}
+      </header>
+
+      <div className="search-wrap">
+        <input
+          className="glass-input"
+          type="search"
+          placeholder="Search your friends…"
+          aria-label="Search your chats by friend username"
+          autoCapitalize="none"
+          spellCheck="false"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </div>
+
+      {conversations.length === 0 ? (
         <div className="empty-state">
           <span className="empty-icon">🌲</span>
           <h2 className="empty-title">{syncing ? "Syncing…" : "No conversations yet"}</h2>
@@ -39,19 +58,16 @@ export default function Chats({ onOpen, onFindPeople, onInvite }) {
             Growth comes from steady, mutual connection — never invite counts.
           </p>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="screen">
-      <header className="screen-header">
-        <h1 className="screen-title">Chats</h1>
-        {syncing && <span className="sync-dot" title="Syncing" />}
-      </header>
-
-      <ul className="chat-list">
-        {conversations.map((conversation) => {
+      ) : visibleConversations.length === 0 ? (
+        <div className="empty-state chat-filter-empty">
+          <span className="empty-icon">⌕</span>
+          <h2 className="empty-title">No matching friends</h2>
+          <p className="empty-sub">Try another username, or clear the search to see every chat.</p>
+          <button className="btn-ghost" onClick={() => setQuery("")}>Clear search</button>
+        </div>
+      ) : (
+        <ul className="chat-list">
+          {visibleConversations.map((conversation) => {
           const count = unread[conversation.id] ?? 0;
           const online = onlineUsers.has(conversation.peerId);
           return (
@@ -77,8 +93,9 @@ export default function Chats({ onOpen, onFindPeople, onInvite }) {
               </button>
             </li>
           );
-        })}
-      </ul>
+          })}
+        </ul>
+      )}
     </div>
   );
 }

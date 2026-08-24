@@ -24,7 +24,11 @@ export default function People({ onOpenConversation }) {
   const [busyId, setBusyId] = useState(null);
   const [notice, setNotice] = useState("");
   const hasSearchTerm = query.trim().length >= 2;
-  const visibleResults = hasSearchTerm ? results : [];
+  // Friends live under Chats. This search is deliberately for finding new
+  // people, so an already accepted friend never appears as a duplicate result.
+  const visibleResults = hasSearchTerm
+    ? results.filter((user) => user.friend_status !== "friends")
+    : [];
 
   const refresh = async () => {
     const { data } = await getFriends();
@@ -74,7 +78,9 @@ export default function People({ onOpenConversation }) {
       <div className="search-wrap">
         <input
           className="glass-input"
-          placeholder="Search by username…"
+          type="search"
+          placeholder="Find new people by username…"
+          aria-label="Find new people by username"
           autoCapitalize="none"
           spellCheck="false"
           value={query}
