@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
 import { timeAgo } from "../../lib/time.js";
 import { filterConversations } from "./chatFilter.js";
+import LevelBadge from "../../components/Level/LevelBadge.jsx";
 
 function previewText(preview) {
   if (!preview) return "No messages yet";
@@ -83,7 +84,12 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
                 </span>
                 <span className="chat-row-body">
                   <span className="chat-row-top">
-                    <span className="chat-row-name">{conversation.peerUsername}</span>
+                    <span className="chat-row-name">
+                      {conversation.peerUsername}
+                      {conversation.peerLevel && (
+                        <LevelBadge level={conversation.peerLevel} size={14} name={conversation.peerLevelName} className="name-gem" />
+                      )}
+                    </span>
                     <span className="chat-row-time">
                       {timeAgo(conversation.preview?.createdAt ?? conversation.updatedAt)}
                     </span>

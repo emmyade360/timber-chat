@@ -47,7 +47,10 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
       <div className="settings-identity">
         <LevelBadge level={me.level} size={54} />
         <div className="settings-identity-text">
-          <span className="settings-identity-name">@{me.username}</span>
+          <span className="settings-identity-name">
+            @{me.username}
+            <LevelBadge level={me.level} size={16} name={me.level_name} className="name-gem" />
+          </span>
           <span className="settings-identity-sub">{me.level_name}</span>
         </div>
       </div>

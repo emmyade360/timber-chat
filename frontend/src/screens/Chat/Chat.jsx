@@ -21,6 +21,7 @@ import { loadConversation, loadOlder, prepareOutgoingPayload } from "../../lib/s
 import { notificationSettings, setChatNotification } from "../../lib/notifications.js";
 import { timeAgo } from "../../lib/time.js";
 import { Icons } from "../../components/Settings/icons.jsx";
+import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import Modal from "../../components/Modal.jsx";
 
 const TYPING_IDLE_MS = 1500;
@@ -344,7 +345,12 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
         <div className="chat-header-identity">
           {onBack && <button className="icon-btn" onClick={onBack} aria-label="Back">{Icons.back}</button>}
           <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
-          <div className="chat-header-text"><span className="chat-header-name">{conversation?.peerUsername}</span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
+          <div className="chat-header-text"><span className="chat-header-name">
+              {conversation?.peerUsername}
+              {conversation?.peerLevel && (
+                <LevelBadge level={conversation.peerLevel} size={15} name={conversation.peerLevelName} className="name-gem" />
+              )}
+            </span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
           <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>

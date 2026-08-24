@@ -1,4 +1,4 @@
-//! The connection-growth path: 21 stages from Seed to Living Grove.
+//! The connection-growth path: 21 stages from Carbon to Koh-i-Noor.
 //!
 //! Stages are named, never numbered, anywhere a person can see them. The number
 //! is an implementation detail for ordering; what someone is told is that they
@@ -31,31 +31,33 @@ macro_rules! ladder {
 }
 
 ladder![
-    // A seed becomes a tree, the tree's wood hardens, its resin fossilises, and
-    // what is left is a gem. The names track the badge's own colour walk in
-    // LevelBadge.jsx -- grey bark, warm heartwood, amber, gold, then crystal --
-    // so the word and the picture always agree.
-    (1, "Seed", 0),
-    (2, "Sprout", 5),
-    (3, "Seedling", 16),
-    (4, "Sapling", 36),
-    (5, "Greenwood", 73),
-    (6, "Willow", 130),
-    (7, "Rowan", 219),
-    (8, "Hazel", 354),
-    (9, "Cedar", 547),
-    (10, "Oak", 807),
-    (11, "Ironbark", 1_146),
-    (12, "Heartwood", 1_588),
-    (13, "Resin", 2_135),
-    (14, "Amber", 2_812),
-    (15, "Copal", 3_645),
-    (16, "Jet", 4_633),
-    (17, "Citrine", 5_830),
-    (18, "Topaz", 7_291),
-    (19, "Sunstone", 9_113),
-    (20, "Moonstone", 11_194),
-    (21, "Living Grove", 13_800),
+    // Carbon becomes rough stone, rough stone is cut, and a cut stone earns a
+    // name. The three acts of the ladder are formation, craft, and legend, and
+    // they track the badge's own palette in LevelBadge.jsx -- dull graphite,
+    // then clear white fire, then the warm and coloured rarities.
+    //
+    // Every name is a single word so it fits beside a username without wrapping.
+    (1, "Carbon", 0),
+    (2, "Ember", 5),
+    (3, "Rough", 16),
+    (4, "Glint", 36),
+    (5, "Facet", 73),
+    (6, "Baguette", 130),
+    (7, "Cushion", 219),
+    (8, "Princess", 354),
+    (9, "Marquise", 547),
+    (10, "Asscher", 807),
+    (11, "Radiant", 1_146),
+    (12, "Solitaire", 1_588),
+    (13, "Brilliant", 2_135),
+    (14, "Champagne", 2_812),
+    (15, "Cognac", 3_645),
+    (16, "Canary", 4_633),
+    (17, "Sancy", 5_830),
+    (18, "Orlov", 7_291),
+    (19, "Regent", 9_113),
+    (20, "Cullinan", 11_194),
+    (21, "Koh-i-Noor", 13_800),
 ];
 
 pub const MAX_LEVEL: i16 = 21;
@@ -91,10 +93,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn path_has_twenty_one_stages_from_seed_to_living_grove() {
+    fn path_has_twenty_one_stages_from_carbon_to_koh_i_noor() {
         assert_eq!(LADDER.len(), 21);
-        assert_eq!(LADDER.first().unwrap().name, "Seed");
-        assert_eq!(LADDER.last().unwrap().name, "Living Grove");
+        assert_eq!(LADDER.first().unwrap().name, "Carbon");
+        assert_eq!(LADDER.last().unwrap().name, "Koh-i-Noor");
         assert_eq!(LADDER.last().unwrap().level, MAX_LEVEL);
     }
 
@@ -145,30 +147,30 @@ mod tests {
     }
 
     #[test]
-    fn a_new_account_starts_as_a_seed() {
+    fn a_new_account_starts_as_carbon() {
         assert_eq!(level_for_growth(0), 1);
         assert_eq!(level_for_growth(-1), 1);
     }
 
     #[test]
-    fn living_grove_is_the_ceiling() {
+    fn koh_i_noor_is_the_ceiling() {
         // Derived from the table, so rebalancing the ladder does not break the test.
-        let living_grove = LADDER.last().unwrap().threshold;
-        assert_eq!(level_for_growth(living_grove), MAX_LEVEL);
+        let top = LADDER.last().unwrap().threshold;
+        assert_eq!(level_for_growth(top), MAX_LEVEL);
         assert_eq!(level_for_growth(i64::MAX), MAX_LEVEL);
         // At the top there is no next tier to divide against.
-        assert_eq!(progress(living_grove), (0, 0));
+        assert_eq!(progress(top), (0, 0));
     }
 
     #[test]
     fn progress_is_measured_within_the_current_stage() {
-        let sprout = LADDER[1].threshold;
-        let seedling = LADDER[2].threshold;
-        let span = seedling - sprout;
+        let second = LADDER[1].threshold;
+        let third = LADDER[2].threshold;
+        let span = third - second;
 
-        assert_eq!(progress(sprout), (0, span));
-        assert_eq!(progress(sprout + span / 2), (span / 2, span));
-        assert_eq!(progress(0), (0, sprout));
+        assert_eq!(progress(second), (0, span));
+        assert_eq!(progress(second + span / 2), (span / 2, span));
+        assert_eq!(progress(0), (0, second));
     }
 
     #[test]
@@ -177,6 +179,6 @@ mod tests {
         let first = steps.first().unwrap();
         let last = steps.last().unwrap();
         assert!(last > first, "later stages must take more steady practice than early ones");
-        assert_eq!(LADDER[1].threshold, 5, "Sprout is reachable on the first check-in");
+        assert_eq!(LADDER[1].threshold, 5, "the second stage is reachable on the first check-in");
     }
 }

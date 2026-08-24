@@ -197,9 +197,14 @@ pub async fn start_pending_call(state: &AppState, call_id: Uuid, conversation_id
 }
 
 pub async fn store_pending_signal(state: &AppState, call_id: Uuid, conversation_id: Uuid, sender: Uuid, kind: &str, signal: SealedCallSignal) -> Result<(), ApiError> {
+    // The SELECT list writes the row; the WHERE only authorises it. They use
+    // different parameters, so the columns are $1, $3..$7 while the guard reuses
+    // $1..$3. Getting this wrong made every answer and ICE candidate fail to
+    // store, and the `?` below then returned before the relay could publish
+    // them -- so no call could ever connect.
     let inserted = sqlx::query(
         "INSERT INTO pending_call_signals (call_id, sender_id, kind, envelope_version, nonce, ciphertext) \
-         SELECT $1, $2, $3, $4, $5, $6 WHERE EXISTS (SELECT 1 FROM pending_calls WHERE call_id = $1 AND conversation_id = $2 AND expires_at > NOW() AND (caller_id = $3 OR recipient_id = $3))",
+         SELECT $1, $3, $4, $5, $6, $7 WHERE EXISTS (SELECT 1 FROM pending_calls WHERE call_id = $1 AND conversation_id = $2 AND expires_at > NOW() AND (caller_id = $3 OR recipient_id = $3))",
     )
     .bind(call_id).bind(conversation_id).bind(sender).bind(kind).bind(signal.version).bind(signal.nonce).bind(signal.ciphertext)
     .execute(&state.db).await?;

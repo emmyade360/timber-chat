@@ -150,3 +150,11 @@ jobs:
           done
           cat /tmp/timber-backend.log
           exit 1
+      - name: Type-check hand-written SQL against the real schema
+        env:
+          # Postgres resolves parameter types at PREPARE time, which is the only
+          # thing that catches a mismatched placeholder list. A shifted list in
+          # the call-signal insert once broke every call with no build or test
+          # failure anywhere.
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/timber
+        run: cargo test --test sql_prepares

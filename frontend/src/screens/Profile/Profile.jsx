@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
 import GrowthBar from "../../components/Level/GrowthBar.jsx";
+import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import { updateCurrentUser, userMessage } from "../../lib/api.js";
 import { SettingsGroup, SettingsRow } from "../../components/Settings/SettingsList.jsx";
 import { Icons } from "../../components/Settings/icons.jsx";
@@ -40,7 +41,10 @@ export default function Profile({ onOpenSettings }) {
       <section className="profile-view-hero">
         <ProfileAvatar username={me.username} url={me.avatar_url} />
         <div className="profile-view-identity">
-          <h2>@{me.username}</h2>
+          <h2>
+            @{me.username}
+            <LevelBadge level={me.level} size={20} name={me.level_name} className="name-gem" />
+          </h2>
           <p>Joined {joined}</p>
         </div>
         <button className="btn-wood profile-edit-button" onClick={() => setEditing(true)}>Edit profile</button>

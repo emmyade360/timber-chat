@@ -434,11 +434,11 @@ function Row({ user, online, children, footnote, onOpen }) {
           {name?.[0]?.toUpperCase() ?? "?"}
         </span>
         <span className="people-row-text">
-          <span className="people-row-name">@{name}</span>
-          <span className="people-row-level">
-            <LevelBadge level={user.level} size={13} name={user.level_name} />
-            <span>{user.level_name}</span>
+          <span className="people-row-name">
+            @{name}
+            <LevelBadge level={user.level} size={14} name={user.level_name} className="name-gem" />
           </span>
+          <span className="people-row-level">{user.level_name}</span>
         </span>
       </Identity>
       {children}

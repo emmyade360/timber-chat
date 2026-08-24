@@ -62,6 +62,10 @@ export async function syncConversations({ reconcile = false } = {}) {
       id: conversation.id,
       peerId: conversation.peer.id,
       peerUsername: conversation.peer.username,
+      // Carried so the chat list and header can show the peer's stone without
+      // a second lookup; it is public profile data, not conversation content.
+      peerLevel: conversation.peer.level,
+      peerLevelName: conversation.peer.level_name,
       createdAt: toMillis(conversation.created_at),
       updatedAt: conversation.last_message_at ? toMillis(conversation.last_message_at) : 0,
       securityError,
