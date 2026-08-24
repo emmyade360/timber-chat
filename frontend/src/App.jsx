@@ -17,7 +17,8 @@ import Chats from "./screens/Chats/Chats.jsx";
 import Chat from "./screens/Chat/Chat.jsx";
 import People from "./screens/People/People.jsx";
 import Explore from "./screens/Explore/Explore.jsx";
-import Me from "./screens/Me/Me.jsx";
+import Profile from "./screens/Profile/Profile.jsx";
+import Settings from "./screens/Me/Me.jsx";
 import LevelBadge from "./components/Level/LevelBadge.jsx";
 import InvitePanel from "./components/Invite/InvitePanel.jsx";
 import CallOverlay from "./components/Call/CallOverlay.jsx";
@@ -97,11 +98,12 @@ const TABS = [
   { id: "people", label: "People", icon: "👥" },
   { id: "explore", label: "Explore", icon: "🧭" },
   { id: "growth", label: "Growth", icon: null },
-  { id: "me", label: "Me", icon: "👤" },
+  { id: "profile", label: "Profile", icon: "👤" },
 ];
 
 function Shell({ onSignOut, onWiped }) {
   const [tab, setTab] = useState("chats");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [openConversation, setOpenConversation] = useState(null);
   const { unread, pendingReceived, me, levelUp, dismissLevelUp } = useChatStore();
   const { send, connected, acknowledge, subscribe } = useWebSocket(true);
@@ -173,7 +175,15 @@ function Shell({ onSignOut, onWiped }) {
         {tab === "people" && <People onOpenConversation={openWithFriend} />}
         {tab === "explore" && <Explore onOpenConversation={openWithFriend} />}
         {tab === "growth" && <Growth />}
-        {tab === "me" && <Me onSignOut={onSignOut} onWiped={onWiped} />}
+        {tab === "profile" && !settingsOpen && <Profile onOpenSettings={() => setSettingsOpen(true)} />}
+        {tab === "profile" && settingsOpen && (
+          <Settings
+            onBack={() => setSettingsOpen(false)}
+            onOpenExplore={() => { setSettingsOpen(false); setTab("explore"); }}
+            onSignOut={onSignOut}
+            onWiped={onWiped}
+          />
+        )}
       </main>
 
       <nav className="tab-bar">
@@ -184,7 +194,7 @@ function Shell({ onSignOut, onWiped }) {
             <button
               key={entry.id}
               className={`tab ${tab === entry.id ? "tab--active" : ""}`}
-              onClick={() => setTab(entry.id)}
+              onClick={() => { setSettingsOpen(false); setTab(entry.id); }}
             >
               <span className="tab-icon">
                 {entry.icon ?? <LevelBadge level={me?.level ?? 1} size={22} />}

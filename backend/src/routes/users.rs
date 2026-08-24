@@ -4,20 +4,21 @@ use axum::{
     Json,
     extract::{Extension, Path, Query, State},
 };
-use std::time::Duration;
+use serde::Deserialize;
 use serde_json::{Value, json};
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::{
     AppState,
-    ws::{EventTarget, publish},
     auth::AuthUser,
     error::ApiError,
-    levels,
     growth::{self, GrowthKind},
+    levels,
     models::{
         PublicProfile, SearchQuery, SearchResult, SelfProfile, SelfProfileRow, UserSearchRow,
     },
+    ws::{EventTarget, publish},
 };
 
 /// Redeem an invite code for a freshly created account.
@@ -177,6 +178,75 @@ pub async fn get_current_user(
     Ok(Json(profile.into()))
 }
 
+/// The non-custodial account name and its public keys are intentionally
+/// immutable. This endpoint changes only the optional profile image, which is
+/// ordinary account metadata rather than encrypted chat content.
+#[derive(Deserialize)]
+pub struct UpdateProfileInput {
+    pub avatar_url: Option<String>,
+}
+
+fn normalize_avatar_url(value: Option<String>) -> Result<Option<String>, ApiError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > 2048 {
+        return Err(ApiError::BadRequest(
+            "Profile photo URL is too long.".into(),
+        ));
+    }
+
+    let parsed = reqwest::Url::parse(value)
+        .map_err(|_| ApiError::BadRequest("Use a valid HTTPS profile photo URL.".into()))?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(ApiError::BadRequest(
+            "Profile photos must use a valid HTTPS URL without embedded credentials.".into(),
+        ));
+    }
+    Ok(Some(value.to_owned()))
+}
+
+pub async fn update_current_user(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(input): Json<UpdateProfileInput>,
+) -> Result<Json<SelfProfile>, ApiError> {
+    if !state
+        .limits
+        .allow("profile-edit", user.id, 12, Duration::from_secs(60 * 60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many profile changes. Try again later.".into(),
+        ));
+    }
+    let avatar_url = normalize_avatar_url(input.avatar_url)?;
+    let profile = sqlx::query_as::<_, SelfProfileRow>(
+        r#"
+        UPDATE profiles
+        SET avatar_url = $2
+        WHERE id = $1
+        RETURNING id, username, avatar_url, is_online, last_seen, growth_points, level,
+                  streak_days, last_active_date, created_at
+        "#,
+    )
+    .bind(user.id)
+    .bind(avatar_url)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| ApiError::NotFound("Profile not found.".into()))?;
+
+    Ok(Json(profile.into()))
+}
+
 /// Search by username.
 ///
 /// Users who have rejected this caller twice are filtered out entirely -- not shown
@@ -319,4 +389,24 @@ pub async fn check_username(
         "username": normalized,
         "reason": if taken { "That username is already taken." } else { "" },
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_avatar_url;
+
+    #[test]
+    fn profile_photo_accepts_only_safe_https_urls() {
+        assert_eq!(
+            normalize_avatar_url(Some(" https://images.example/avatar.png ".into())).unwrap(),
+            Some("https://images.example/avatar.png".into()),
+        );
+        assert_eq!(normalize_avatar_url(Some("  ".into())).unwrap(), None);
+        assert!(normalize_avatar_url(Some("http://images.example/avatar.png".into())).is_err());
+        assert!(
+            normalize_avatar_url(Some("https://user:pass@images.example/avatar.png".into()))
+                .is_err()
+        );
+        assert!(normalize_avatar_url(Some("not a URL".into())).is_err());
+    }
 }

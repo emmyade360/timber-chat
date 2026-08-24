@@ -240,7 +240,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/login", post(auth::login));
 
     let protected_api = Router::new()
-        .route("/users/me", get(routes::users::get_current_user))
+        .route(
+            "/users/me",
+            get(routes::users::get_current_user).patch(routes::users::update_current_user),
+        )
         .route("/users/search", get(routes::users::search_users))
         .route("/users/{id}", get(routes::users::get_user))
         .route("/users/me/kex-key", post(auth::attest_kex_key))
@@ -302,7 +305,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .allow_origin(
                     cors_origins,
                 )
-                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
                 .allow_headers([AUTHORIZATION, CONTENT_TYPE]),
         )
         .layer(middleware::map_response(security_headers))

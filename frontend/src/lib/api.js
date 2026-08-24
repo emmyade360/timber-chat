@@ -141,6 +141,7 @@ export function apiError(error, fallback = "Something went wrong. Please try aga
 // --- endpoints -------------------------------------------------------------
 
 export const getCurrentUser = () => api.get("/api/users/me");
+export const updateCurrentUser = (profile) => api.patch("/api/users/me", profile);
 export const getConversations = () => api.get("/api/conversations");
 export const getHistory = (conversationId, params) =>
   api.get(`/api/conversations/${conversationId}/messages`, { params });

@@ -1,4 +1,4 @@
-// Profile, progression, and account safety.
+// Settings: progression, privacy, notifications, device continuity, and account safety.
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
@@ -14,7 +14,7 @@ import {
   updateNotificationSettings,
 } from "../../lib/notifications.js";
 
-export default function Me({ onSignOut, onWiped }) {
+export default function Settings({ onBack, onOpenExplore, onSignOut, onWiped }) {
   const { me, ladder } = useChatStore();
   const [panel, setPanel] = useState(null);
 
@@ -27,7 +27,8 @@ export default function Me({ onSignOut, onWiped }) {
   return (
     <div className="screen">
       <header className="screen-header">
-        <h1 className="screen-title">Me</h1>
+        <button className="screen-header-action" onClick={onBack} aria-label="Back to profile">‹</button>
+        <h1 className="screen-title">Settings</h1>
       </header>
 
       <section className="profile-hero">
@@ -54,6 +55,12 @@ export default function Me({ onSignOut, onWiped }) {
       </section>
 
       <InvitePanel />
+
+      <section className="panel">
+        <h3 className="section-title">Privacy & discovery</h3>
+        <p className="panel-note">Chats are private and encrypted. Explore is separate, opt-in public profile data for finding friends; it never uses device location or open DMs.</p>
+        <button className="btn-ghost btn-block" onClick={onOpenExplore}>Manage Explore privacy</button>
+      </section>
 
       <NotificationControls />
       <DeviceContinuity />
@@ -101,7 +108,7 @@ export default function Me({ onSignOut, onWiped }) {
       )}
 
       <section className="panel">
-        <h3 className="section-title">Your account</h3>
+        <h3 className="section-title">Account & security</h3>
         <p className="panel-note">
           Timber has no password and no email. Your twelve-word phrase is the only way
           back in — keep it somewhere safe and never share it.
