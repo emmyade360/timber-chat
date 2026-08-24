@@ -35,3 +35,7 @@ services:
         sync: false
       - key: WEBRTC_TURN_SHARED_SECRET
         sync: false
+      - key: WEB_PUSH_VAPID_PRIVATE_KEY
+        sync: false
+      - key: WEB_PUSH_VAPID_SUBJECT
+        sync: false

@@ -1,3 +1,4 @@
+pub mod calls;
 pub mod conversations;
 pub mod explore;
 pub mod friends;

@@ -3,9 +3,13 @@
 // DTLS/SRTP and is never stored by Timber.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getWebRtcIceServers, userMessage } from "../lib/api.js";
+import { getPendingCalls, getWebRtcIceServers, userMessage } from "../lib/api.js";
+import { payloads } from "../crypto/envelope.js";
+import { openCallSignal, sealCallSignal } from "../db/localStore.js";
+import { sendEncryptedPayload } from "../lib/sync.js";
+import { createCallTonePlayer } from "../lib/callTones.js";
 
-const CONNECT_TIMEOUT_MS = 45_000;
+const CONNECT_TIMEOUT_MS = 60_000;
 const AUDIO_CONSTRAINTS = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -80,20 +84,37 @@ function candidateFromWire(candidate) {
 export function useCall(send, subscribe) {
   const [call, setCall] = useState(idleCall);
   const callRef = useRef(null);
+  const orphanSignals = useRef(new Map());
+  const tones = useRef(null);
+  const startTone = useCallback((kind) => {
+    tones.current ??= createCallTonePlayer();
+    tones.current.start(kind);
+  }, []);
+  const stopTones = useCallback(() => tones.current?.stop(), []);
 
   const clearTimer = useCallback((context) => {
     if (context?.connectTimer) clearTimeout(context.connectTimer);
     if (context) context.connectTimer = null;
   }, []);
 
+  const recordStatus = useCallback(async (context, status, durationMs = null) => {
+    if (!context || context.incoming || !context.cardWritten) return;
+    try {
+      await sendEncryptedPayload(send, context.conversationId, payloads.callUpdate(context.callId, { status, durationMs }));
+    } catch {
+      // A status row is an enhancement; a failed relay must not keep media alive.
+    }
+  }, [send]);
+
   const stopContext = useCallback((context, notice = "") => {
     if (!context || callRef.current !== context) return;
     clearTimer(context);
+    stopTones();
     context.pc?.close();
     context.localStream?.getTracks().forEach((track) => track.stop());
     callRef.current = null;
     setCall({ ...idleCall(), notice });
-  }, [clearTimer]);
+  }, [clearTimer, stopTones]);
 
   const sendEnd = useCallback((context, reason) => {
     if (!context) return false;
@@ -104,14 +125,43 @@ export function useCall(send, subscribe) {
     });
   }, [send]);
 
+  const callStatusForEnd = (reason, active) => {
+    if (active || reason === "hangup") return "completed";
+    return ({ declined: "declined", busy: "unavailable", unavailable: "unavailable", no_answer: "no_answer", failed: "failed" })[reason] ?? "failed";
+  };
+
+  const finish = useCallback((context, reason, notice = "") => {
+    if (!context) return;
+    sendEnd(context, reason);
+    const active = context.activeStartedAt != null;
+    void recordStatus(context, callStatusForEnd(reason, active), active ? Date.now() - context.activeStartedAt : null);
+    stopContext(context, notice);
+  }, [recordStatus, sendEnd, stopContext]);
+
   const scheduleConnectTimeout = useCallback((context) => {
     clearTimer(context);
     context.connectTimer = setTimeout(() => {
       if (callRef.current !== context || context.pc?.connectionState === "connected") return;
-      sendEnd(context, "unavailable");
-      stopContext(context, "The call could not connect. Try again when both of you have a stronger connection.");
+      finish(context, "no_answer", "Your friend did not answer the call.");
     }, CONNECT_TIMEOUT_MS);
-  }, [clearTimer, sendEnd, stopContext]);
+  }, [clearTimer, finish]);
+
+  const sendSealedSignal = useCallback(async (type, context, payload = {}) => {
+    const envelope = await sealCallSignal(context.conversationId, {
+      v: 1,
+      t: type,
+      call_id: context.callId,
+      ...payload,
+    });
+    if (!send(`call.${type}`, {
+      conversation_id: context.conversationId,
+      call_id: context.callId,
+      ...(type === "offer" ? { media: context.mode } : {}),
+      ...envelope,
+    })) {
+      throw new Error("You are offline. Reconnect before starting a call.");
+    }
+  }, [send]);
 
   const flushCandidates = useCallback(async (context) => {
     const pending = context.pendingCandidates.splice(0);
@@ -129,11 +179,11 @@ export function useCall(send, subscribe) {
     });
     pc.onicecandidate = ({ candidate }) => {
       if (!candidate || callRef.current !== context) return;
-      send("call.ice-candidate", {
-        conversation_id: context.conversationId,
-        call_id: context.callId,
-        candidate: candidate.toJSON(),
-      });
+      if (!context.incoming && !context.offerSent) {
+        context.localCandidates.push(candidate.toJSON());
+        return;
+      }
+      void sendSealedSignal("ice-candidate", context, { candidate: candidate.toJSON() }).catch(() => {});
     };
     pc.ontrack = ({ streams, track }) => {
       if (callRef.current !== context) return;
@@ -146,15 +196,17 @@ export function useCall(send, subscribe) {
       if (callRef.current !== context) return;
       if (pc.connectionState === "connected") {
         clearTimer(context);
+        context.activeStartedAt ??= Date.now();
+        stopTones();
         setCall((current) => current.callId === context.callId ? { ...current, phase: "active" } : current);
+        void recordStatus(context, "active");
       } else if (pc.connectionState === "failed") {
-        sendEnd(context, "failed");
-        stopContext(context, "The call ended because the connection failed.");
+        finish(context, "failed", "The call ended because the connection failed.");
       }
     };
     context.pc = pc;
     return pc;
-  }, [clearTimer, send, sendEnd, stopContext]);
+  }, [clearTimer, finish, recordStatus, sendSealedSignal, stopTones]);
 
   const addLocalTracks = useCallback(async (context, stream) => {
     context.localStream = stream;
@@ -179,7 +231,11 @@ export function useCall(send, subscribe) {
       localStream: null,
       remoteStream: null,
       pendingCandidates: [],
+      localCandidates: [],
       connectTimer: null,
+      cardWritten: false,
+      offerSent: false,
+      activeStartedAt: null,
     };
     callRef.current = context;
     setCall({ ...idleCall(), phase: "preparing", callId, conversationId, mode, peerName });
@@ -197,26 +253,27 @@ export function useCall(send, subscribe) {
       await addLocalTracks(context, stream);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      if (!send("call.offer", {
-        conversation_id: conversationId,
-        call_id: callId,
-        media: mode,
-        sdp: pc.localDescription.sdp,
-      })) {
-        throw new Error("You are offline. Reconnect before starting a call.");
+      await sendEncryptedPayload(send, conversationId, payloads.call({ callId, mode }));
+      context.cardWritten = true;
+      await sendSealedSignal("offer", context, { sdp: pc.localDescription.sdp });
+      context.offerSent = true;
+      for (const candidate of context.localCandidates.splice(0)) {
+        void sendSealedSignal("ice-candidate", context, { candidate }).catch(() => {});
       }
       setCall((current) => current.callId === callId ? { ...current, phase: "calling" } : current);
       scheduleConnectTimeout(context);
     } catch (error) {
+      await recordStatus(context, "failed");
       stopContext(context);
       throw new Error(callError(error, "Could not start the call."));
     }
-  }, [addLocalTracks, makeConnection, scheduleConnectTimeout, send, stopContext]);
+  }, [addLocalTracks, makeConnection, recordStatus, scheduleConnectTimeout, send, sendSealedSignal, stopContext]);
 
   const acceptCall = useCallback(async () => {
     const context = callRef.current;
     if (!context?.incoming || context.pc) return;
     setCall((current) => current.callId === context.callId ? { ...current, phase: "preparing", notice: "" } : current);
+    stopTones();
     try {
       const { data } = await getWebRtcIceServers();
       const stream = await constrainedMedia(context.mode);
@@ -231,27 +288,15 @@ export function useCall(send, subscribe) {
       await flushCandidates(context);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      if (!send("call.answer", {
-        conversation_id: context.conversationId,
-        call_id: context.callId,
-        sdp: pc.localDescription.sdp,
-      })) {
-        throw new Error("You are offline. Reconnect before answering the call.");
-      }
+      await sendSealedSignal("answer", context, { sdp: pc.localDescription.sdp });
       setCall((current) => current.callId === context.callId ? { ...current, phase: "connecting" } : current);
       scheduleConnectTimeout(context);
     } catch (error) {
-      sendEnd(context, "unavailable");
-      stopContext(context, callError(error, "Could not answer the call."));
+      finish(context, "unavailable", callError(error, "Could not answer the call."));
     }
-  }, [addLocalTracks, flushCandidates, makeConnection, scheduleConnectTimeout, send, sendEnd, stopContext]);
+  }, [addLocalTracks, finish, flushCandidates, makeConnection, scheduleConnectTimeout, sendSealedSignal, stopTones]);
 
-  const endCall = useCallback((reason = "hangup") => {
-    const context = callRef.current;
-    if (!context) return;
-    sendEnd(context, reason);
-    stopContext(context);
-  }, [sendEnd, stopContext]);
+  const endCall = useCallback((reason = "hangup") => finish(callRef.current, reason), [finish]);
 
   const toggleMuted = useCallback(() => {
     const context = callRef.current;
@@ -283,61 +328,141 @@ export function useCall(send, subscribe) {
         }
         return;
       }
-      const incoming = {
-        callId: payload.call_id,
-        conversationId: payload.conversation_id,
-        mode: payload.media === "video" ? "video" : "audio",
-        peerName: payload.username || "A friend",
-        incoming: true,
-        offer: payload,
-        pc: null,
-        localStream: null,
-        remoteStream: null,
-        pendingCandidates: [],
-        connectTimer: null,
-      };
-      callRef.current = incoming;
-      setCall({ ...idleCall(), phase: "incoming", callId: incoming.callId, conversationId: incoming.conversationId, mode: incoming.mode, peerName: incoming.peerName });
+      void (async () => {
+        try {
+          const offer = await openCallSignal(payload.conversation_id, payload.from, payload);
+          if (offer.t !== "offer" || offer.call_id !== payload.call_id || callRef.current) return;
+          const incoming = {
+            callId: payload.call_id,
+            conversationId: payload.conversation_id,
+            mode: payload.media === "video" ? "video" : "audio",
+            peerName: payload.username || "A friend",
+            incoming: true,
+            offer,
+            pc: null,
+            localStream: null,
+            remoteStream: null,
+            pendingCandidates: [],
+            localCandidates: [],
+            connectTimer: null,
+            cardWritten: false,
+            activeStartedAt: null,
+          };
+          callRef.current = incoming;
+          const earlyCandidates = orphanSignals.current.get(incoming.callId) ?? [];
+          orphanSignals.current.delete(incoming.callId);
+          for (const candidate of earlyCandidates) {
+            try {
+              const signal = await openCallSignal(incoming.conversationId, candidate.from, candidate);
+              if (signal.t === "ice-candidate" && signal.call_id === incoming.callId && signal.candidate) incoming.pendingCandidates.push(signal.candidate);
+            } catch { /* a stale encrypted candidate is harmless */ }
+          }
+          setCall({ ...idleCall(), phase: "incoming", callId: incoming.callId, conversationId: incoming.conversationId, mode: incoming.mode, peerName: incoming.peerName });
+          startTone("incoming");
+          send("call.ringing", { conversation_id: incoming.conversationId, call_id: incoming.callId });
+        } catch {
+          send("call.end", { conversation_id: payload.conversation_id, call_id: payload.call_id, reason: "failed" });
+        }
+      })();
+      return;
+    }
+    if (!context && type === "call.ice-candidate") {
+      const queued = orphanSignals.current.get(payload.call_id) ?? [];
+      if (queued.length < 64) orphanSignals.current.set(payload.call_id, [...queued, payload]);
       return;
     }
     if (!context || context.callId !== payload.call_id || context.conversationId !== payload.conversation_id) return;
-    if (type === "call.answer" && !context.incoming && context.pc) {
+    if (type === "call.ringing" && !context.incoming) {
+      startTone("ringback");
+      setCall((current) => current.callId === context.callId ? { ...current, phase: "ringing" } : current);
+      void recordStatus(context, "ringing");
+    } else if (type === "call.answer" && !context.incoming && context.pc) {
       void (async () => {
         try {
-          await context.pc.setRemoteDescription({ type: "answer", sdp: payload.sdp });
+          const answer = await openCallSignal(context.conversationId, payload.from, payload);
+          if (answer.t !== "answer" || answer.call_id !== context.callId) throw new Error("Invalid call answer");
+          stopTones();
+          await context.pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
           await flushCandidates(context);
           setCall((current) => current.callId === context.callId ? { ...current, phase: "connecting" } : current);
         } catch {
-          sendEnd(context, "failed");
-          stopContext(context, "The call could not be connected securely.");
+          finish(context, "failed", "The call could not be connected securely.");
         }
       })();
-    } else if (type === "call.ice-candidate" && payload.candidate) {
-      if (context.pc?.remoteDescription) {
-        void context.pc.addIceCandidate(candidateFromWire(payload.candidate)).catch(() => {});
-      } else {
-        context.pendingCandidates.push(payload.candidate);
-      }
+    } else if (type === "call.ice-candidate" && context.pc) {
+      void (async () => {
+        try {
+          const signal = await openCallSignal(context.conversationId, payload.from, payload);
+          if (signal.t !== "ice-candidate" || signal.call_id !== context.callId || !signal.candidate) return;
+          if (context.pc.remoteDescription) await context.pc.addIceCandidate(candidateFromWire(signal.candidate));
+          else context.pendingCandidates.push(signal.candidate);
+        } catch { /* invalid encrypted candidates are ignored */ }
+      })();
     } else if (type === "call.end") {
       const messages = {
         busy: "Your friend is already on another call.",
         declined: "Your friend declined the call.",
         unavailable: "Your friend is unavailable for a call right now.",
+        no_answer: "Your friend did not answer the call.",
         failed: "The call ended because the connection failed.",
         hangup: "The call ended.",
       };
+      if (!context.incoming) {
+        const active = context.activeStartedAt != null;
+        void recordStatus(context, callStatusForEnd(payload.reason, active), active ? Date.now() - context.activeStartedAt : null);
+      }
       stopContext(context, messages[payload.reason] ?? "The call ended.");
     }
-  }), [flushCandidates, send, sendEnd, stopContext, subscribe]);
+  }), [finish, flushCandidates, recordStatus, send, startTone, stopContext, stopTones, subscribe]);
 
   useEffect(() => () => {
     const context = callRef.current;
     if (context) stopContext(context);
+    orphanSignals.current.clear();
+    tones.current?.dispose();
   }, [stopContext]);
 
   const dismissNotice = useCallback(() => {
     setCall((current) => current.phase === "idle" ? { ...current, notice: "" } : current);
   }, []);
+
+  /** Recover the offer stored for an installed PWA that was closed at call time. */
+  const resumePendingCalls = useCallback(async () => {
+    if (callRef.current) return;
+    const { data } = await getPendingCalls();
+    const pending = data?.find((entry) => entry.signals?.some((signal) => signal.kind === "offer"));
+    if (!pending || callRef.current) return;
+    const wireOffer = pending.signals.find((signal) => signal.kind === "offer");
+    const offer = await openCallSignal(pending.conversation_id, wireOffer.from, wireOffer);
+    if (offer.t !== "offer" || offer.call_id !== pending.call_id || callRef.current) return;
+    const incoming = {
+      callId: pending.call_id,
+      conversationId: pending.conversation_id,
+      mode: pending.media === "video" ? "video" : "audio",
+      peerName: pending.username || "A friend",
+      incoming: true,
+      offer,
+      pc: null,
+      localStream: null,
+      remoteStream: null,
+      pendingCandidates: [],
+      localCandidates: [],
+      connectTimer: null,
+      cardWritten: false,
+      activeStartedAt: null,
+    };
+    // Replay any candidates gathered before the PWA was opened.
+    for (const signal of pending.signals.filter((entry) => entry.kind === "ice-candidate")) {
+      try {
+        const opened = await openCallSignal(incoming.conversationId, signal.from, signal);
+        if (opened.t === "ice-candidate" && opened.candidate) incoming.pendingCandidates.push(opened.candidate);
+      } catch { /* a malformed stale candidate does not invalidate the offer */ }
+    }
+    callRef.current = incoming;
+    setCall({ ...idleCall(), phase: "incoming", callId: incoming.callId, conversationId: incoming.conversationId, mode: incoming.mode, peerName: incoming.peerName });
+    startTone("incoming");
+    send("call.ringing", { conversation_id: incoming.conversationId, call_id: incoming.callId });
+  }, [send, startTone]);
 
   return {
     call,
@@ -347,5 +472,6 @@ export function useCall(send, subscribe) {
     toggleMuted,
     toggleCamera,
     dismissNotice,
+    resumePendingCalls,
   };
 }

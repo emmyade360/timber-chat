@@ -76,13 +76,13 @@ function aad(version, conversationId, senderId) {
  *
  * @returns {{envelope_version:number, nonce:string, ciphertext:string}} base64 fields
  */
-export function seal({ key, conversationId, senderId, payload }) {
+export function seal({ key, conversationId, senderId, payload, maxCiphertextBytes = MAX_CIPHERTEXT_BYTES }) {
   const nonce = randomBytes(NONCE_BYTES);
   const plaintext = utf8ToBytes(JSON.stringify(payload));
   const ciphertext = xchacha20poly1305(key, nonce, aad(ENVELOPE_VERSION, conversationId, senderId)).encrypt(plaintext);
   plaintext.fill(0);
 
-  if (ciphertext.length > MAX_CIPHERTEXT_BYTES) {
+  if (ciphertext.length > maxCiphertextBytes) {
     throw new Error("That message is too long to send.");
   }
 
@@ -138,6 +138,23 @@ export const payloads = {
   decisionVote: (decisionId, value) => ({ v: ENVELOPE_VERSION, t: "decision_vote", decision_id: decisionId, value }),
   postcard: ({ body, expiresAt, kind = "text", replyTo = null }) => ({
     v: ENVELOPE_VERSION, t: "postcard", kind, body, expires_at: expiresAt, ...(replyTo ? { reply_to: replyTo } : {}),
+  }),
+  /**
+   * The record a call leaves behind in the conversation.
+   *
+   * Only the caller writes it, and only the caller amends it, so the two devices
+   * never race to describe the same call. Signalling itself is never stored by
+   * the server; this card is an ordinary sealed message like any other.
+   */
+  call: ({ callId, mode, status = "calling" }) => ({
+    v: ENVELOPE_VERSION, t: "call", call_id: callId, mode, status,
+  }),
+  callUpdate: (callId, { status, durationMs = null }) => ({
+    v: ENVELOPE_VERSION,
+    t: "call_update",
+    call_id: callId,
+    status,
+    ...(durationMs ? { duration_ms: durationMs } : {}),
   }),
 };
 

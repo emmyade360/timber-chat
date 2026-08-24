@@ -596,10 +596,10 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 14px 6px;
+  padding: 10px 12px 5px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
 }
 
 .e2e-notice {
@@ -619,8 +619,8 @@ body {
 .bubble-row--mine { justify-content: flex-end; }
 
 .bubble {
-  max-width: min(78%, 34rem);
-  padding: 9px 13px 7px;
+  max-width: min(72%, 30rem);
+  padding: 7px 10px 6px;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
   animation: bubble 0.2s ease-out;
@@ -639,8 +639,8 @@ body {
 
 .bubble-body {
   display: block;
-  font-size: 15.5px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.4;
   color: var(--text-primary);
 }
 
@@ -682,15 +682,21 @@ body {
 
 .composer {
   display: flex;
-  gap: 9px;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  gap: 7px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--glass-border);
   background: rgba(28, 16, 8, 0.86);
   backdrop-filter: blur(16px);
 }
 
 .composer-input { flex: 1; }
-.composer-send { padding: 10px 16px; flex-shrink: 0; }
+.composer-send { min-height: 44px; padding: 9px 14px; flex-shrink: 0; }
+.call-history-card { display: flex; align-items: center; gap: 8px; min-width: 150px; color: var(--wood-cream); }
+.call-history-card > span:first-child { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: rgba(212,137,74,.18); color: var(--wood-pale); }
+.call-history-card strong, .call-history-card small { display: block; }
+.call-history-card strong { font-size: 13px; }
+.call-history-card small { margin-top: 2px; color: var(--text-muted); font-size: 11px; }
+.install-prompt { width: min(100%, 28rem); }
 
 /* ═══════════════════════════════════════════════════════════
    PEOPLE
@@ -1234,9 +1240,13 @@ body {
    form content to an uncomfortable line length. */
 @media (min-width: 600px) and (max-width: 899px) {
   .screen:not(.chat-screen) { width: 100%; max-width: 48rem; margin-inline: auto; }
-  .chat-screen { width: 100%; max-width: 58rem; margin-inline: auto; }
+  .chat-screen { width: 100%; max-width: 52rem; margin-inline: auto; }
   .onboard-card { width: min(100%, 34rem); }
   .modal, .levelup { width: min(100%, 32rem); }
+}
+
+@media (min-width: 900px) {
+  .chat-screen { width: min(100%, 52rem); margin-inline: auto; border-inline: 1px solid rgba(196, 154, 108, .14); }
 }
 
 /* The 320–480px range is common for narrow Android phones and split-screen
@@ -1263,7 +1273,7 @@ body {
     border-top: 1px solid rgba(196, 154, 108, 0.14);
   }
   .message-scroll { padding-inline: 10px; }
-  .bubble { max-width: 88%; }
+  .bubble { max-width: 86%; }
   .composer { gap: 6px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); }
   .composer-send { padding-inline: 12px; }
   .composer-options { padding-inline: 8px; }

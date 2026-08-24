@@ -13,8 +13,9 @@ import {
   requestNotificationPermission,
   updateNotificationSettings,
 } from "../../lib/notifications.js";
+import { callAlertsEnabled, disableCallAlerts, enableCallAlerts, pushSupported } from "../../lib/push.js";
 
-export default function Settings({ onBack, onOpenExplore, onSignOut, onWiped }) {
+export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped }) {
   const { me, ladder } = useChatStore();
   const [panel, setPanel] = useState(null);
 
@@ -63,6 +64,12 @@ export default function Settings({ onBack, onOpenExplore, onSignOut, onWiped }) 
       </section>
 
       <NotificationControls />
+      <CallAlertControls />
+      <section className="panel">
+        <h3 className="section-title">Timber app</h3>
+        <p className="panel-note">Install Timber for a focused full-screen experience. Installation never changes how your encrypted data is stored.</p>
+        <button className="btn-ghost btn-block" onClick={onOpenInstall}>Install Timber</button>
+      </section>
       <DeviceContinuity />
 
       {ladder?.practices && (
@@ -132,6 +139,25 @@ export default function Settings({ onBack, onOpenExplore, onSignOut, onWiped }) 
       {panel === "wipe" && <WipeDevice onClose={() => setPanel(null)} onWiped={onWiped} />}
     </div>
   );
+}
+
+function CallAlertControls() {
+  const [enabled, setEnabled] = useState(false);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    callAlertsEnabled().then(setEnabled).catch(() => setEnabled(false));
+  }, []);
+  return <section className="panel">
+    <h3 className="section-title">Incoming call alerts</h3>
+    <p className="panel-note">Optional. When Timber is installed but closed, a browser notification can say who is calling. It never includes chat text.</p>
+    {!pushSupported() ? <p className="panel-note">This browser does not support background call alerts.</p> : !enabled ? <button className="btn-ghost btn-block" onClick={async () => {
+      try { await enableCallAlerts(); setEnabled(true); setNotice("Incoming call alerts are on for this device."); }
+      catch (error) { setNotice(error.message || "Call alerts could not be enabled."); }
+    }}>Enable incoming call alerts</button> : <button className="btn-ghost btn-block" onClick={async () => {
+      await disableCallAlerts(); setEnabled(false); setNotice("Incoming call alerts are off for this device.");
+    }}>Turn off incoming call alerts</button>}
+    {notice && <p className="field-ok">{notice}</p>}
+  </section>;
 }
 
 function DeviceContinuity() {

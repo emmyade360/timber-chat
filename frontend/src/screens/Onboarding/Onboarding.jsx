@@ -55,7 +55,7 @@ export default function Onboarding({ onReady }) {
       // failed signup cannot leave a half-created account locked on the device.
       await createVault(mnemonic, pin);
       openSession(mnemonic);
-      onReady();
+      onReady({ newAccount: isNewAccount });
     } catch (caught) {
       setError(caught.message);
     } finally {
@@ -138,7 +138,7 @@ export default function Onboarding({ onReady }) {
                 const identity = deriveIdentity(phrase);
                 await signIn(identity);
                 openSession(phrase);
-                onReady();
+                onReady({ newAccount: false });
               } catch (caught) {
                 setError(caught.message);
               } finally {

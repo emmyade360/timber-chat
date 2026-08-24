@@ -22,11 +22,11 @@ import { notificationSettings, setChatNotification } from "../../lib/notificatio
 import { timeAgo } from "../../lib/time.js";
 
 const TYPING_IDLE_MS = 1500;
-const POSTCARD_LIFETIME_MS = 24 * 60 * 60 * 1000;
-
+const VOICE_NOTE_LIFETIME_MS = 24 * 60 * 60 * 1000;
 function labelForPayload(payload) {
   if (payload?.t === "file") return payload.kind === "voice" ? "Voice note" : `Attachment: ${payload.name ?? "file"}`;
   if (payload?.t === "decision") return `${payload.kind === "poll" ? "Poll" : "Decision"}: ${payload.prompt}`;
+  if (payload?.t === "call") return `${payload.mode === "video" ? "Video" : "Audio"} call`;
   return payload?.body ?? "";
 }
 
@@ -38,9 +38,6 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
   const [showSafety, setShowSafety] = useState(false);
   const [verified, setVerified] = useState(false);
   const [replyTo, setReplyTo] = useState(null);
-  const [quiet, setQuiet] = useState(false);
-  const [postcard, setPostcard] = useState(false);
-  const [scheduleAt, setScheduleAt] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -125,23 +122,15 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     typingTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
 
-  const sendPayload = async (payload, { attachmentId = null, attachmentExpiresAt = null, scheduled = null } = {}) => {
-    const scheduledAt = scheduled ? new Date(scheduled).getTime() : null;
-    const { clientId, envelope } = await prepareOutgoingPayload(conversationId, payload, { scheduledAt });
-    const delivered = scheduled
-      ? send("message.schedule", {
-        conversation_id: conversationId,
-        client_id: clientId,
-        deliver_after: new Date(scheduled).toISOString(),
-        ...envelope,
-      })
-      : send("message.send", {
-        conversation_id: conversationId,
-        client_id: clientId,
-        attachment_id: attachmentId,
-        attachment_expires_at: attachmentExpiresAt,
-        ...envelope,
-      });
+  const sendPayload = async (payload, { attachmentId = null, attachmentExpiresAt = null } = {}) => {
+    const { clientId, envelope } = await prepareOutgoingPayload(conversationId, payload);
+    const delivered = send("message.send", {
+      conversation_id: conversationId,
+      client_id: clientId,
+      attachment_id: attachmentId,
+      attachment_expires_at: attachmentExpiresAt,
+      ...envelope,
+    });
     if (!delivered) setSendError("Offline — this stays sealed on this device until you reconnect.");
     return clientId;
   };
@@ -151,23 +140,10 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     if (!body || !secure) return;
     setSendError("");
     stopTyping();
-    let scheduled = null;
-    if (scheduleAt) {
-      scheduled = new Date(scheduleAt);
-      if (Number.isNaN(scheduled.getTime()) || scheduled.getTime() < Date.now() + 30_000) {
-        setSendError("Choose a delivery time at least 30 seconds from now.");
-        return;
-      }
-    }
     try {
-      const payload = postcard
-        ? payloads.postcard({ body, replyTo: replyTo?.id, expiresAt: new Date(Date.now() + POSTCARD_LIFETIME_MS).toISOString() })
-        : payloads.text(body, { replyTo: replyTo?.id, quiet });
-      await sendPayload(payload, { scheduled });
+      await sendPayload(payloads.text(body, { replyTo: replyTo?.id }));
       setText("");
       setReplyTo(null);
-      setPostcard(false);
-      setScheduleAt("");
     } catch (error) {
       setSendError(userMessage(error, "Could not send that message. Please try again."));
     }
@@ -187,7 +163,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     try {
       const { blob, key } = encryptFile(new Uint8Array(await file.arrayBuffer()));
       const { data } = await uploadEncrypted(blob);
-      const expiresAt = kind === "voice" ? new Date(Date.now() + POSTCARD_LIFETIME_MS).toISOString() : null;
+      const expiresAt = kind === "voice" ? new Date(Date.now() + VOICE_NOTE_LIFETIME_MS).toISOString() : null;
       const payload = payloads.file({
         attachmentId: data.attachment_id,
         key,
@@ -260,16 +236,6 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
   const showSaved = async () => {
     setSavedEntries(await savedMessages());
     setSavedOpen(true);
-  };
-
-  const makeDecision = async () => {
-    const kind = (window.prompt("Choose: poll, availability, or reminder", "poll") ?? "").trim().toLowerCase();
-    if (!new Set(["poll", "availability", "reminder"]).has(kind)) return;
-    const prompt = window.prompt("What do you want to decide together?");
-    if (!prompt?.trim()) return;
-    const options = (window.prompt("Options, separated by commas (optional):") ?? "")
-      .split(",").map((value) => value.trim()).filter(Boolean).slice(0, 6);
-    await sendControl(payloads.decision({ kind, prompt: prompt.trim(), options }));
   };
 
   const toggleChatNotifications = async () => {
@@ -349,17 +315,11 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
 
       {sendError && <p className="chat-send-error">{sendError}</p>}
       {replyTo && <div className="reply-bar"><span>Replying to {labelForPayload(replyTo.payload).slice(0, 70)}</span><button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
-      <div className="composer-options">
-        <button className={`composer-mode ${quiet ? "composer-mode--on" : ""}`} onClick={() => setQuiet((value) => !value)} title="Quiet send — no notification preview">Quiet</button>
-        <button className={`composer-mode ${postcard ? "composer-mode--on" : ""}`} onClick={() => setPostcard((value) => !value)} title="24-hour expiring text postcard">Postcard</button>
-        <button className="composer-mode" onClick={makeDecision}>Decision</button>
-        <label className="composer-schedule">Deliver later <input type="datetime-local" value={scheduleAt} onChange={(event) => setScheduleAt(event.target.value)} /></label>
-      </div>
       <div className="composer">
         <input ref={fileInput} className="sr-only" type="file" onChange={(event) => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
         <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">＋</button>
         <button className={`composer-attach ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? "■" : "●"}</button>
-        <input className="glass-input composer-input" placeholder={postcard ? "Write an expiring postcard…" : "Say something…"} value={text} onChange={(event) => handleChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} disabled={!secure} />
+        <input className="glass-input composer-input" placeholder="Say something…" value={text} onChange={(event) => handleChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} disabled={!secure} />
         <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()}>Send</button>
       </div>
 
@@ -374,5 +334,21 @@ function MessageContent({ message, replied, onDownload, onVote }) {
   if (payload.reply_to) return <><span className="reply-quote">↩ {replied ? labelForPayload(replied.payload).slice(0, 70) : "Reply"}</span><MessageContent message={{ ...message, payload: { ...payload, reply_to: null } }} replied={null} onDownload={onDownload} onVote={onVote} /></>;
   if (payload.t === "file") return <button className="attachment-card" onClick={() => onDownload(message)}>{payload.kind === "voice" ? "🎙" : "📎"} {payload.name ?? "Encrypted attachment"}{payload.kind === "voice" && payload.duration_ms ? ` · ${Math.ceil(payload.duration_ms / 1000)}s` : ""}</button>;
   if (payload.t === "decision") return <div className="decision-card"><strong>{payload.kind === "poll" ? "Poll" : "Decision"}</strong><span>{payload.prompt}</span>{payload.options?.length > 0 && <div className="decision-options">{payload.options.map((option) => <button key={option} onClick={() => onVote(option)}>{option} {Object.values(message.votes ?? {}).filter((vote) => vote === option).length || ""}</button>)}</div>}</div>;
+  if (payload.t === "call") return <CallCard payload={payload} />;
   return <span className="bubble-body">{payload.body}</span>;
+}
+
+function CallCard({ payload }) {
+  const labels = {
+    calling: "Calling…",
+    ringing: "Ringing…",
+    active: "In call",
+    completed: "Call ended",
+    declined: "Declined",
+    no_answer: "No answer",
+    unavailable: "Unavailable",
+    failed: "Could not connect",
+  };
+  const seconds = Math.round((payload.duration_ms ?? 0) / 1000);
+  return <div className="call-history-card"><span aria-hidden="true">{payload.mode === "video" ? "▣" : "☎"}</span><span><strong>{payload.mode === "video" ? "Video" : "Audio"} call</strong><small>{labels[payload.status] ?? "Call"}{seconds ? ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : ""}</small></span></div>;
 }

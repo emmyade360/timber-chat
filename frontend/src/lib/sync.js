@@ -228,6 +228,20 @@ export async function prepareOutgoingPayload(conversationId, payload, { createdA
   return { clientId, envelope };
 }
 
+/** Send an ordinary sealed envelope from code that is not the chat composer.
+ * Call history uses this so its status is encrypted just like any other message.
+ */
+export async function sendEncryptedPayload(send, conversationId, payload) {
+  const { clientId, envelope } = await prepareOutgoingPayload(conversationId, payload);
+  const delivered = send("message.send", {
+    conversation_id: conversationId,
+    client_id: clientId,
+    ...envelope,
+  });
+  if (!delivered) throw new Error("Realtime connection is unavailable.");
+  return clientId;
+}
+
 export async function prepareOutgoing(conversationId, text, options = {}) {
   return prepareOutgoingPayload(conversationId, payloads.text(text, options));
 }

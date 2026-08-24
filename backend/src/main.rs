@@ -230,6 +230,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 warn!(?error, "Could not deliver scheduled envelopes");
             }
             routes::upload::cleanup_expired_attachments(&scheduled_state).await;
+            routes::calls::cleanup_expired_calls(&scheduled_state).await;
         }
     });
 
@@ -260,6 +261,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/auth/logout", post(auth::logout))
         .route("/ws-ticket", post(auth::issue_ws_ticket))
         .route("/webrtc/ice-servers", get(routes::webrtc::get_ice_servers))
+        .route("/calls/pending", get(routes::calls::get_pending_calls))
+        .route("/push-subscriptions", post(routes::calls::upsert_push_subscription).delete(routes::calls::delete_push_subscription))
         .route("/invite", get(routes::users::get_invite))
         .route("/friends", get(routes::friends::get_friends))
         .route("/friends/{id}", delete(routes::friends::remove_friend))

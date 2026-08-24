@@ -38,8 +38,7 @@ use crate::{
 
 const NONCE_BYTES: usize = 24;
 const MAX_CIPHERTEXT_BYTES: usize = 8192;
-const MAX_CALL_SDP_BYTES: usize = 32 * 1024;
-const MAX_ICE_CANDIDATE_BYTES: usize = 2048;
+const MAX_CALL_SIGNAL_CIPHERTEXT_BYTES: usize = 48 * 1024;
 
 /// Who should receive an event.
 ///
@@ -155,30 +154,37 @@ struct CallOfferInput {
     conversation_id: Uuid,
     call_id: Uuid,
     media: CallMedia,
-    sdp: String,
+    #[serde(flatten)]
+    signal: SealedCallSignalInput,
 }
 
 #[derive(Deserialize)]
 struct CallAnswerInput {
     conversation_id: Uuid,
     call_id: Uuid,
-    sdp: String,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct IceCandidateInput {
-    candidate: String,
-    sdp_mid: Option<String>,
-    sdp_m_line_index: Option<u16>,
-    username_fragment: Option<String>,
+    #[serde(flatten)]
+    signal: SealedCallSignalInput,
 }
 
 #[derive(Deserialize)]
 struct CallIceCandidateInput {
     conversation_id: Uuid,
     call_id: Uuid,
-    candidate: IceCandidateInput,
+    #[serde(flatten)]
+    signal: SealedCallSignalInput,
+}
+
+#[derive(Deserialize)]
+struct SealedCallSignalInput {
+    envelope_version: i16,
+    nonce: String,
+    ciphertext: String,
+}
+
+#[derive(Deserialize)]
+struct CallRingingInput {
+    conversation_id: Uuid,
+    call_id: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -314,11 +320,11 @@ async fn process_socket_event(
         "message.schedule" => ("ws-schedule", 12, Duration::from_secs(60 * 60)),
         "typing.start" | "typing.stop" => ("ws-typing", 20, Duration::from_secs(10)),
         "receipt.read" => ("ws-receipt", 60, Duration::from_secs(60)),
-        // SDP is small, ephemeral setup metadata; offers are intentionally rare.
+        // Every call signal is opaque to the relay and bound to a short-lived call.
         "call.offer" => ("ws-call-offer", 4, Duration::from_secs(60)),
         "call.answer" => ("ws-call-answer", 8, Duration::from_secs(60)),
-        // ICE trickling legitimately emits several candidates for a single call.
         "call.ice-candidate" => ("ws-call-ice", 160, Duration::from_secs(60)),
+        "call.ringing" => ("ws-call-ringing", 12, Duration::from_secs(60)),
         "call.end" => ("ws-call-end", 20, Duration::from_secs(60)),
         _ => return Err(ApiError::BadRequest("Unknown WebSocket event type.".into())),
     };
@@ -332,6 +338,7 @@ async fn process_socket_event(
         "call.offer" => relay_call_offer(state, user, deserialize_payload(event.payload)?).await,
         "call.answer" => relay_call_answer(state, user, deserialize_payload(event.payload)?).await,
         "call.ice-candidate" => relay_call_ice_candidate(state, user, deserialize_payload(event.payload)?).await,
+        "call.ringing" => relay_call_ringing(state, user, deserialize_payload(event.payload)?).await,
         "call.end" => relay_call_end(state, user, deserialize_payload(event.payload)?).await,
         "typing.start" | "typing.stop" => {
             let input: TypingInput = deserialize_payload(event.payload)?;
@@ -399,25 +406,22 @@ async fn call_peer(
     Ok(peer)
 }
 
-fn validate_sdp(sdp: &str) -> Result<(), ApiError> {
-    if sdp.len() > MAX_CALL_SDP_BYTES || !sdp.is_ascii() {
-        return Err(ApiError::BadRequest("Invalid call session description.".into()));
+fn validate_call_signal(input: SealedCallSignalInput) -> Result<crate::routes::calls::SealedCallSignal, ApiError> {
+    if !matches!(input.envelope_version, 1 | 2) {
+        return Err(ApiError::BadRequest("Unsupported call signal format.".into()));
     }
-    if !sdp.starts_with("v=0") || !sdp.contains("\nm=") {
-        return Err(ApiError::BadRequest("Invalid call session description.".into()));
+    let nonce = BASE64.decode(input.nonce)
+        .map_err(|_| ApiError::BadRequest("Invalid encrypted call signal.".into()))?;
+    let ciphertext = BASE64.decode(input.ciphertext)
+        .map_err(|_| ApiError::BadRequest("Invalid encrypted call signal.".into()))?;
+    if nonce.len() != NONCE_BYTES || ciphertext.is_empty() || ciphertext.len() > MAX_CALL_SIGNAL_CIPHERTEXT_BYTES {
+        return Err(ApiError::BadRequest("Invalid encrypted call signal.".into()));
     }
-    Ok(())
+    Ok(crate::routes::calls::SealedCallSignal { version: input.envelope_version, nonce, ciphertext })
 }
 
-fn validate_candidate(candidate: &IceCandidateInput) -> Result<(), ApiError> {
-    if candidate.candidate.is_empty()
-        || candidate.candidate.len() > MAX_ICE_CANDIDATE_BYTES
-        || !candidate.candidate.starts_with("candidate:")
-        || candidate.sdp_mid.as_deref().is_some_and(|value| value.len() > 64)
-    {
-        return Err(ApiError::BadRequest("Invalid ICE candidate.".into()));
-    }
-    Ok(())
+fn media_name(media: CallMedia) -> &'static str {
+    match media { CallMedia::Audio => "audio", CallMedia::Video => "video" }
 }
 
 async fn relay_call_offer(
@@ -425,8 +429,10 @@ async fn relay_call_offer(
     user: &AuthUser,
     input: CallOfferInput,
 ) -> Result<(), ApiError> {
-    validate_sdp(&input.sdp)?;
+    let signal = validate_call_signal(input.signal)?;
     let peer = call_peer(state, user, input.conversation_id).await?;
+    let media = media_name(input.media);
+    crate::routes::calls::start_pending_call(state, input.call_id, input.conversation_id, user.id, peer, media, signal.clone()).await?;
     publish(
         state,
         EventTarget::User(peer),
@@ -434,12 +440,20 @@ async fn relay_call_offer(
         json!({
             "conversation_id": input.conversation_id,
             "call_id": input.call_id,
-            "media": input.media,
-            "sdp": input.sdp,
+            "media": media,
+            "envelope_version": signal.version,
+            "nonce": BASE64.encode(signal.nonce),
+            "ciphertext": BASE64.encode(signal.ciphertext),
             "from": user.id,
             "username": user.username,
         }),
     );
+    let recipient_online = state.online_users.lock().await.contains_key(&peer);
+    if !recipient_online && crate::routes::calls::send_call_push(state, peer, input.call_id, &user.username, media).await {
+        publish(state, EventTarget::User(user.id), "call.ringing", json!({
+            "conversation_id": input.conversation_id, "call_id": input.call_id, "from": peer,
+        }));
+    }
     Ok(())
 }
 
@@ -448,8 +462,10 @@ async fn relay_call_answer(
     user: &AuthUser,
     input: CallAnswerInput,
 ) -> Result<(), ApiError> {
-    validate_sdp(&input.sdp)?;
+    let signal = validate_call_signal(input.signal)?;
     let peer = call_peer(state, user, input.conversation_id).await?;
+    crate::routes::calls::require_pending_recipient(state, input.call_id, input.conversation_id, user.id).await?;
+    crate::routes::calls::store_pending_signal(state, input.call_id, input.conversation_id, user.id, "answer", signal.clone()).await?;
     publish(
         state,
         EventTarget::User(peer),
@@ -457,7 +473,9 @@ async fn relay_call_answer(
         json!({
             "conversation_id": input.conversation_id,
             "call_id": input.call_id,
-            "sdp": input.sdp,
+            "envelope_version": signal.version,
+            "nonce": BASE64.encode(signal.nonce),
+            "ciphertext": BASE64.encode(signal.ciphertext),
             "from": user.id,
         }),
     );
@@ -469,8 +487,9 @@ async fn relay_call_ice_candidate(
     user: &AuthUser,
     input: CallIceCandidateInput,
 ) -> Result<(), ApiError> {
-    validate_candidate(&input.candidate)?;
+    let signal = validate_call_signal(input.signal)?;
     let peer = call_peer(state, user, input.conversation_id).await?;
+    crate::routes::calls::store_pending_signal(state, input.call_id, input.conversation_id, user.id, "ice-candidate", signal.clone()).await?;
     publish(
         state,
         EventTarget::User(peer),
@@ -478,10 +497,25 @@ async fn relay_call_ice_candidate(
         json!({
             "conversation_id": input.conversation_id,
             "call_id": input.call_id,
-            "candidate": input.candidate,
+            "envelope_version": signal.version,
+            "nonce": BASE64.encode(signal.nonce),
+            "ciphertext": BASE64.encode(signal.ciphertext),
             "from": user.id,
         }),
     );
+    Ok(())
+}
+
+async fn relay_call_ringing(
+    state: &AppState,
+    user: &AuthUser,
+    input: CallRingingInput,
+) -> Result<(), ApiError> {
+    let peer = call_peer(state, user, input.conversation_id).await?;
+    crate::routes::calls::require_pending_recipient(state, input.call_id, input.conversation_id, user.id).await?;
+    publish(state, EventTarget::User(peer), "call.ringing", json!({
+        "conversation_id": input.conversation_id, "call_id": input.call_id, "from": user.id,
+    }));
     Ok(())
 }
 
@@ -492,7 +526,7 @@ async fn relay_call_end(
 ) -> Result<(), ApiError> {
     let peer = call_peer(state, user, input.conversation_id).await?;
     let reason = input.reason.unwrap_or_else(|| "hangup".into());
-    if !matches!(reason.as_str(), "hangup" | "declined" | "busy" | "unavailable" | "failed") {
+    if !matches!(reason.as_str(), "hangup" | "declined" | "busy" | "unavailable" | "no_answer" | "failed") {
         return Err(ApiError::BadRequest("Invalid call end reason.".into()));
     }
     publish(
@@ -506,6 +540,7 @@ async fn relay_call_end(
             "from": user.id,
         }),
     );
+    crate::routes::calls::delete_pending_call(state, input.call_id).await;
     Ok(())
 }
 
@@ -787,20 +822,18 @@ mod tests {
     }
 
     #[test]
-    fn call_setup_rejects_malformed_sdp_and_ice_candidates() {
-        assert!(validate_sdp("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n").is_ok());
-        assert!(validate_sdp("not a session description").is_err());
-        assert!(validate_candidate(&IceCandidateInput {
-            candidate: "candidate:1 1 udp 1 192.0.2.1 1234 typ host".into(),
-            sdp_mid: Some("0".into()),
-            sdp_m_line_index: Some(0),
-            username_fragment: None,
-        }).is_ok());
-        assert!(validate_candidate(&IceCandidateInput {
-            candidate: "not-a-candidate".into(),
-            sdp_mid: None,
-            sdp_m_line_index: None,
-            username_fragment: None,
-        }).is_err());
+    fn call_setup_accepts_only_bounded_opaque_envelopes() {
+        let valid = SealedCallSignalInput {
+            envelope_version: 2,
+            nonce: BASE64.encode([7u8; NONCE_BYTES]),
+            ciphertext: BASE64.encode([9u8; 48]),
+        };
+        assert!(validate_call_signal(valid).is_ok());
+        let plaintext_sdp = SealedCallSignalInput {
+            envelope_version: 2,
+            nonce: "not-a-nonce".into(),
+            ciphertext: "v=0\r\nm=audio".into(),
+        };
+        assert!(validate_call_signal(plaintext_sdp).is_err());
     }
 }

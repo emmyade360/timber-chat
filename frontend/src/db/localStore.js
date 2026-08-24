@@ -27,6 +27,7 @@ import { currentIdentity } from "../crypto/session.js";
 import { verifyKexKeyBinding } from "../crypto/identity.js";
 
 const NONCE_BYTES = 24;
+const MAX_CALL_SIGNAL_CIPHERTEXT_BYTES = 48 * 1024;
 
 /** Seal an arbitrary value under the device key, for metadata at rest. */
 function sealLocal(value) {
@@ -177,6 +178,28 @@ export async function keyForConversation(conversationId) {
   });
 }
 
+/** Seal transient WebRTC signalling with the same conversation key as chat.
+ * Unlike messages, these envelopes are never written to IndexedDB. */
+export async function sealCallSignal(conversationId, payload) {
+  const identity = currentIdentity();
+  const key = await keyForConversation(conversationId);
+  if (!key) throw new Error("This conversation is not ready for a secure call.");
+  return seal({
+    key,
+    conversationId,
+    senderId: identity.userId,
+    payload,
+    maxCiphertextBytes: MAX_CALL_SIGNAL_CIPHERTEXT_BYTES,
+  });
+}
+
+/** Open a short-lived encrypted SDP or ICE signal delivered by the relay. */
+export async function openCallSignal(conversationId, senderId, envelope) {
+  const key = await keyForConversation(conversationId);
+  if (!key) throw new Error("This conversation is not ready for a secure call.");
+  return openEnvelope({ key, conversationId, senderId, envelope });
+}
+
 // --- messages --------------------------------------------------------------
 
 /**
@@ -292,6 +315,21 @@ export function presentMessages(messages, now = Date.now()) {
         const votes = { ...(original.votes ?? {}) };
         votes[message.senderId] = payload.value;
         original.votes = votes;
+      }
+      continue;
+    }
+    if (payload.t === "call_update") {
+      const original = [...visible.values()].find((entry) => (
+        entry.payload?.t === "call" && entry.payload.call_id === payload.call_id
+      ));
+      // A call card has one author: the person who placed the call. The peer can
+      // signal its outcome, but cannot forge or rewrite the encrypted history.
+      if (original && original.senderId === message.senderId) {
+        original.payload = {
+          ...original.payload,
+          status: payload.status,
+          ...(Number.isFinite(payload.duration_ms) ? { duration_ms: payload.duration_ms } : {}),
+        };
       }
       continue;
     }

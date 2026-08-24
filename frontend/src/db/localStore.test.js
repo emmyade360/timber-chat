@@ -220,6 +220,24 @@ describe("messages", () => {
     expect(JSON.stringify(await (await timberDb()).getAll(STORE_MESSAGES))).not.toContain("edited");
   });
 
+  it("updates a call card only when its original caller sends the encrypted status", () => {
+    const call = {
+      id: "call-card", senderId: "caller", createdAt: 1,
+      payload: payloads.call({ callId: "call-1", mode: "audio" }),
+    };
+    const forged = {
+      id: "forged-update", senderId: "peer", createdAt: 2,
+      payload: payloads.callUpdate("call-1", { status: "declined" }),
+    };
+    const update = {
+      id: "valid-update", senderId: "caller", createdAt: 3,
+      payload: payloads.callUpdate("call-1", { status: "completed", durationMs: 9_000 }),
+    };
+    const [shown] = presentMessages([call, forged, update]);
+    expect(shown.payload.status).toBe("completed");
+    expect(shown.payload.duration_ms).toBe(9_000);
+  });
+
   it("searches only after locally opening encrypted envelopes", async () => {
     await composeMessage({ conversationId: CONVERSATION, payload: payloads.text("meet at cedar library"), id: "searchable" });
     const raw = await (await timberDb()).getAll(STORE_MESSAGES);

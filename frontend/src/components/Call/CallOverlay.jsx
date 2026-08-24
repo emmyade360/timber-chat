@@ -31,6 +31,7 @@ function phaseLabel(call) {
   if (call.phase === "incoming") return `Incoming ${call.mode} call`;
   if (call.phase === "preparing") return "Starting secure call…";
   if (call.phase === "calling") return "Calling…";
+  if (call.phase === "ringing") return "Ringing…";
   if (call.phase === "connecting") return "Connecting securely…";
   return call.mode === "video" ? "Video call" : "Audio call";
 }

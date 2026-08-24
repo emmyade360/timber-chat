@@ -174,6 +174,9 @@ export const checkUsername = (username) =>
   api.get(`/usernames/${encodeURIComponent(username)}`);
 export const createWebSocketTicket = () => api.post("/api/ws-ticket");
 export const getWebRtcIceServers = () => api.get("/api/webrtc/ice-servers");
+export const getPendingCalls = () => api.get("/api/calls/pending");
+export const savePushSubscription = (subscription) => api.post("/api/push-subscriptions", subscription);
+export const removePushSubscription = (endpoint) => api.delete("/api/push-subscriptions", { data: { endpoint } });
 export const logout = () => api.post("/api/auth/logout");
 export const uploadEncrypted = (blob) => {
   const form = new FormData();

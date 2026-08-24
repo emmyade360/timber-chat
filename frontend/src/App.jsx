@@ -22,12 +22,16 @@ import Settings from "./screens/Me/Me.jsx";
 import LevelBadge from "./components/Level/LevelBadge.jsx";
 import InvitePanel from "./components/Invite/InvitePanel.jsx";
 import CallOverlay from "./components/Call/CallOverlay.jsx";
+import InstallTimberPrompt from "./components/Install/InstallTimberPrompt.jsx";
+import { usePwaInstall } from "./hooks/usePwaInstall.js";
 import "./index.css";
 
 export default function App() {
   const [phase, setPhase] = useState("loading");
   const [notice, setNotice] = useState("");
   const [configurationError] = useState(() => runtimeConfigurationError());
+  const [newAccountInstall, setNewAccountInstall] = useState(false);
+  const pwa = usePwaInstall();
 
   useEffect(() => {
     vaultExists().then((exists) => {
@@ -36,8 +40,9 @@ export default function App() {
     });
   }, []);
 
-  const enter = useCallback(() => {
+  const enter = useCallback((options = {}) => {
     setNotice("");
+    setNewAccountInstall(Boolean(options.newAccount));
     setPhase("ready");
   }, []);
 
@@ -90,7 +95,7 @@ export default function App() {
 
   if (phase === "locked") return <Unlock onUnlocked={enter} onWiped={wiped} />;
 
-  return <Shell onSignOut={lock} onWiped={wiped} />;
+  return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
 }
 
 const TABS = [
@@ -101,20 +106,24 @@ const TABS = [
   { id: "profile", label: "Profile", icon: "👤" },
 ];
 
-function Shell({ onSignOut, onWiped }) {
+function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled }) {
   const [tab, setTab] = useState("chats");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openConversation, setOpenConversation] = useState(null);
+  const [manualInstall, setManualInstall] = useState(false);
   const { unread, pendingReceived, me, levelUp, dismissLevelUp } = useChatStore();
   const { send, connected, acknowledge, subscribe } = useWebSocket(true);
   const callController = useCall(send, subscribe);
+  const { resumePendingCalls } = callController;
   useCalmCheckIns(true);
 
   useEffect(() => {
-    bootstrap().catch(() => {
-      /* offline: the local store already painted what this device knows */
-    });
-  }, []);
+    bootstrap()
+      .catch(() => {
+        /* offline: the local store already painted what this device knows */
+      })
+      .finally(() => { resumePendingCalls().catch(() => {}); });
+  }, [resumePendingCalls]);
 
   // Clearing the badge is a side effect of having the conversation on screen.
   useEffect(() => {
@@ -124,6 +133,8 @@ function Shell({ onSignOut, onWiped }) {
   useEffect(() => {
     useChatStore.getState().setActiveConversation(openConversation);
   }, [openConversation]);
+
+  const installMode = manualInstall ? "manual" : newAccountInstall ? "new-account" : null;
 
   const totalUnread = Object.values(unread).reduce((sum, count) => sum + count, 0);
 
@@ -180,6 +191,7 @@ function Shell({ onSignOut, onWiped }) {
           <Settings
             onBack={() => setSettingsOpen(false)}
             onOpenExplore={() => { setSettingsOpen(false); setTab("explore"); }}
+            onOpenInstall={() => setManualInstall(true)}
             onSignOut={onSignOut}
             onWiped={onWiped}
           />
@@ -219,6 +231,7 @@ function Shell({ onSignOut, onWiped }) {
         </div>
       )}
       <CallOverlay {...callController} />
+      <InstallTimberPrompt open={Boolean(installMode)} manual={installMode === "manual"} pwa={pwa} onClose={() => { setManualInstall(false); onInstallHandled(); }} />
     </div>
   );
 }
