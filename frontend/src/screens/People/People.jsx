@@ -21,32 +21,37 @@ export default function People({ onOpenConversation }) {
   const { friends, pendingReceived, pendingSent, setFriends, onlineUsers, me } = useChatStore();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
+  const [searchState, setSearchState] = useState("idle");
   const [busyId, setBusyId] = useState(null);
   const [notice, setNotice] = useState("");
   const hasSearchTerm = query.trim().length >= 2;
-  // Friends live under Chats. This search is deliberately for finding new
-  // people, so an already accepted friend never appears as a duplicate result.
-  const visibleResults = hasSearchTerm
-    ? results.filter((user) => user.friend_status !== "friends")
-    : [];
+  const visibleResults = hasSearchTerm ? results : [];
 
   const refresh = async () => {
     const { data } = await getFriends();
     setFriends(data);
   };
 
-  // Debounced so typing a username does not fire a request per keystroke.
+  // Debounced so typing a username does not fire a request per keystroke, and
+  // guarded so a slow response for an older query cannot replace newer results.
   useEffect(() => {
     const term = query.trim();
     if (term.length < 2) return undefined;
+    let active = true;
     const timer = setTimeout(async () => {
+      setSearchState("searching");
       try {
-        setResults((await searchUsers(term)).data);
+        const response = await searchUsers(term);
+        if (!active) return;
+        setResults(response.data);
+        setSearchState("done");
       } catch {
+        if (!active) return;
         setResults([]);
+        setSearchState("error");
       }
     }, 250);
-    return () => clearTimeout(timer);
+    return () => { active = false; clearTimeout(timer); };
   }, [query]);
 
   const act = async (id, fn, successMessage = "") => {
@@ -86,6 +91,12 @@ export default function People({ onOpenConversation }) {
       "Friend request sent. You can chat once they accept.",
     );
 
+  const changeQuery = (value) => {
+    setQuery(value);
+    setResults([]);
+    setSearchState(value.trim().length >= 2 ? "searching" : "idle");
+  };
+
   return (
     <div className="screen">
       <div className="screen-toolbar">
@@ -101,17 +112,20 @@ export default function People({ onOpenConversation }) {
             autoCapitalize="none"
             spellCheck="false"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => changeQuery(event.target.value)}
           />
         </div>
       </div>
 
-      {me && <ContactExchange onAdd={async (id) => { await sendFriendRequest(id); await refresh(); }} />}
-
       {notice && <p className="form-error people-notice">{notice}</p>}
 
-      {visibleResults.length > 0 && (
-        <Section title="Search results">
+      {hasSearchTerm && (
+        <Section title={searchState === "done" ? `People found (${visibleResults.length})` : "Find people"}>
+          <div className="search-feedback" aria-live="polite">
+            {searchState === "searching" && "Searching Timber…"}
+            {searchState === "error" && "Search is unavailable right now. Please try again."}
+            {searchState === "done" && visibleResults.length === 0 && "No Timber users match that username."}
+          </div>
           {visibleResults.map((user) => (
             <Row key={user.id} user={user} online={onlineUsers.has(user.id)}>
               <SearchAction
@@ -196,6 +210,8 @@ export default function People({ onOpenConversation }) {
           ))
         )}
       </Section>
+
+      {me && <ContactExchange onAdd={async (id) => { await sendFriendRequest(id); await refresh(); }} />}
     </div>
   );
 }
