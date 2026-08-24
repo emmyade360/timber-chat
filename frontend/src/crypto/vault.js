@@ -20,6 +20,10 @@ const VAULT_KEY = "seed";
 const NONCE_BYTES = 24;
 
 export const MIN_PIN_LENGTH = 8;
+// New PINs are capped so an accidental paste cannot make the browser spend
+// unbounded time copying input before the deliberately memory-hard scrypt step.
+// Existing vaults remain unlockable because unlockVault does not apply this cap.
+export const MAX_PIN_LENGTH = 64;
 export const MAX_ATTEMPTS = 10;
 const VAULT_VERSION = 2;
 
@@ -32,7 +36,8 @@ function wrappingKey(pin, salt) {
 }
 
 export function isValidPin(pin) {
-  return typeof pin === "string" && new RegExp(`^\\d{${MIN_PIN_LENGTH},}$`).test(pin);
+  return typeof pin === "string"
+    && new RegExp(`^\\d{${MIN_PIN_LENGTH},${MAX_PIN_LENGTH}}$`).test(pin);
 }
 
 /** Does this device already hold an account? Decides Onboarding vs Unlock on boot. */
@@ -52,7 +57,7 @@ export async function attemptsRemaining() {
 /** Seal a phrase under a PIN and persist it. Overwrites any existing vault. */
 export async function createVault(mnemonic, pin) {
   if (!isValidPin(pin)) {
-    throw new Error(`Your PIN needs at least ${MIN_PIN_LENGTH} characters.`);
+    throw new Error(`Your PIN needs ${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits.`);
   }
 
   const salt = randomBytes(32);

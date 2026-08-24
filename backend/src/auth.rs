@@ -36,6 +36,8 @@ pub const WS_TICKET_TTL_SECONDS: i64 = 60;
 const NONCE_BYTES: usize = 32;
 const SESSION_TOKEN_BYTES: usize = 32;
 const KEY_BINDING_DOMAIN: &[u8] = b"timber/key-binding/v1\0";
+const AUTH_ATTEMPTS_PER_MINUTE: usize = 12;
+const GLOBAL_AUTH_ATTEMPTS_PER_MINUTE: usize = 240;
 
 /// Invite codes omit 0/O/1/I/L so a code copied by hand cannot resolve elsewhere.
 const INVITE_ALPHABET: &[u8] = b"23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -143,7 +145,7 @@ async fn verify_challenge(
     signature_b64: &str,
 ) -> Result<(), ApiError> {
     let row: Option<(Vec<u8>, DateTime<Utc>)> =
-        sqlx::query_as("DELETE FROM auth_challenges WHERE identity_pk = $1 RETURNING nonce, expires_at")
+        sqlx::query_as("SELECT nonce, expires_at FROM auth_challenges WHERE identity_pk = $1")
             .bind(&identity_pk[..])
             .fetch_optional(db)
             .await?;
@@ -152,6 +154,13 @@ async fn verify_challenge(
         ApiError::BadRequest("No pending challenge for this key. Request a new one.".into())
     })?;
     if expires_at < Utc::now() {
+        // Expired entries cannot be useful, but an invalid signature must never
+        // be able to consume a still-valid challenge for somebody else.
+        sqlx::query("DELETE FROM auth_challenges WHERE identity_pk = $1 AND nonce = $2")
+            .bind(&identity_pk[..])
+            .bind(&nonce)
+            .execute(db)
+            .await?;
         return Err(ApiError::BadRequest(
             "That challenge expired. Request a new one.".into(),
         ));
@@ -163,7 +172,52 @@ async fn verify_challenge(
         VerifyingKey::from_bytes(identity_pk).map_err(|_| ApiError::Unauthorized)?;
     verifying_key
         .verify(&nonce, &Signature::from_bytes(&signature_bytes))
-        .map_err(|_| ApiError::Unauthorized)
+        .map_err(|_| ApiError::Unauthorized)?;
+
+    // Consume only after a valid proof.  The nonce predicate makes two valid,
+    // concurrent attempts race safely while a forged request cannot invalidate
+    // an in-progress sign-in.
+    let consumed = sqlx::query("DELETE FROM auth_challenges WHERE identity_pk = $1 AND nonce = $2 AND expires_at >= NOW()")
+        .bind(&identity_pk[..])
+        .bind(&nonce)
+        .execute(db)
+        .await?;
+    if consumed.rows_affected() != 1 {
+        return Err(ApiError::BadRequest(
+            "No pending challenge for this key. Request a new one.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Challenge signatures are inexpensive to verify, but public keys are public
+/// metadata. Limit verification both per identity and globally so a known key
+/// cannot be used as a CPU or challenge-lifecycle denial-of-service target.
+async fn allow_auth_attempt(state: &AppState, identity_pk: &[u8; 32]) -> Result<(), ApiError> {
+    if !state
+        .limits
+        .allow(
+            "auth-verify-global",
+            "all",
+            GLOBAL_AUTH_ATTEMPTS_PER_MINUTE,
+            StdDuration::from_secs(60),
+        )
+        .await
+        || !state
+            .limits
+            .allow(
+                "auth-verify",
+                BASE64.encode(identity_pk),
+                AUTH_ATTEMPTS_PER_MINUTE,
+                StdDuration::from_secs(60),
+            )
+            .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many sign-in attempts. Try again shortly.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn random_token() -> String {
@@ -278,6 +332,10 @@ pub async fn challenge(
     let identity_pk = decode_key(&input.identity_pk, "identity_pk")?;
     if !state
         .limits
+        .allow("challenge-global", "all", 120, StdDuration::from_secs(60))
+        .await
+        || !state
+            .limits
         .allow("challenge", BASE64.encode(identity_pk), 10, StdDuration::from_secs(60))
         .await
     {
@@ -288,17 +346,23 @@ pub async fn challenge(
     rand::thread_rng().fill_bytes(&mut nonce);
     let expires_at = Utc::now() + Duration::seconds(CHALLENGE_TTL_SECONDS);
 
-    sqlx::query(
+    // Do not replace a still-live nonce. Identity public keys are intentionally
+    // public, so otherwise anybody could repeatedly request a challenge for a
+    // victim and make their legitimate signed response fail.
+    let (nonce, expires_at): (Vec<u8>, DateTime<Utc>) = sqlx::query_as(
         r#"
         INSERT INTO auth_challenges (identity_pk, nonce, expires_at)
         VALUES ($1, $2, $3)
-        ON CONFLICT (identity_pk) DO UPDATE SET nonce = $2, expires_at = $3
+        ON CONFLICT (identity_pk) DO UPDATE
+        SET nonce = CASE WHEN auth_challenges.expires_at <= NOW() THEN EXCLUDED.nonce ELSE auth_challenges.nonce END,
+            expires_at = CASE WHEN auth_challenges.expires_at <= NOW() THEN EXCLUDED.expires_at ELSE auth_challenges.expires_at END
+        RETURNING nonce, expires_at
         "#,
     )
     .bind(&identity_pk[..])
     .bind(&nonce)
     .bind(expires_at)
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await?;
 
     // Opportunistically clear expired rows so the table cannot grow without bound
@@ -350,6 +414,7 @@ pub async fn register(
     let kex_pk = decode_key(&input.kex_pk, "kex_pk")?;
     let username = normalize_username(&input.username)?;
 
+    allow_auth_attempt(&state, &identity_pk).await?;
     verify_challenge(&state.db, &identity_pk, &input.signature).await?;
 
     let user_id = user_id_for_public_key(&identity_pk);
@@ -426,6 +491,7 @@ pub async fn login(
     Json(input): Json<LoginInput>,
 ) -> Result<Json<SessionResponse>, ApiError> {
     let identity_pk = decode_key(&input.identity_pk, "identity_pk")?;
+    allow_auth_attempt(&state, &identity_pk).await?;
     verify_challenge(&state.db, &identity_pk, &input.signature).await?;
 
     let user_id = user_id_for_public_key(&identity_pk);
@@ -466,6 +532,15 @@ pub async fn attest_kex_key(
     Extension(user): Extension<AuthUser>,
     Json(input): Json<AttestKexKeyInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if !state
+        .limits
+        .allow("kex-attestation", user.id, 12, StdDuration::from_secs(60 * 60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many security-key updates. Try again later.".into(),
+        ));
+    }
     let kex_pk = decode_key(&input.kex_pk, "kex_pk")?;
     let identity_pk: Vec<u8> = sqlx::query_scalar("SELECT identity_pk FROM profiles WHERE id = $1")
         .bind(user.id)

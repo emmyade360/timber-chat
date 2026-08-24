@@ -109,6 +109,15 @@ pub async fn download_file(
     Extension(user): Extension<AuthUser>,
     Path(attachment_id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
+    if !state
+        .limits
+        .allow("attachment-download", user.id, 60, Duration::from_secs(60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many attachment downloads. Try again shortly.".into(),
+        ));
+    }
     let object_key: Uuid = sqlx::query_scalar(
         r#"
         SELECT a.object_key
@@ -134,6 +143,16 @@ pub async fn download_file(
         .map_err(|error| ApiError::Upstream(error.to_string()))?;
     if !upstream.status().is_success() {
         return Err(ApiError::NotFound("Attachment is no longer available.".into()));
+    }
+    if upstream
+        .content_length()
+        .is_some_and(|length| length > MAX_UPLOAD_BYTES as u64)
+    {
+        // The application only ever writes bounded opaque blobs. Refuse an
+        // unexpectedly large upstream object before buffering it in RAM.
+        return Err(ApiError::Upstream(
+            "Encrypted attachment exceeded the permitted size.".into(),
+        ));
     }
     let bytes = upstream
         .bytes()

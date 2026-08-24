@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   MAX_ATTEMPTS,
+  MAX_PIN_LENGTH,
   MIN_PIN_LENGTH,
   VaultWipedError,
   WrongPinError,
@@ -28,11 +29,12 @@ describe("pin policy", () => {
     expect(isValidPin("1".repeat(MIN_PIN_LENGTH))).toBe(true);
     expect(isValidPin("1".repeat(MIN_PIN_LENGTH - 1))).toBe(false);
     expect(isValidPin("passphrase")).toBe(false);
+    expect(isValidPin("1".repeat(MAX_PIN_LENGTH + 1))).toBe(false);
     expect(isValidPin("")).toBe(false);
   });
 
   it("refuses to create a vault with a short pin", async () => {
-    await expect(createVault(PHRASE, "123")).rejects.toThrow(/at least/i);
+    await expect(createVault(PHRASE, "123")).rejects.toThrow(/digits/i);
   });
 
   it("accepts an eight-digit PIN", async () => {

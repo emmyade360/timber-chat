@@ -39,6 +39,8 @@ use crate::{
 const NONCE_BYTES: usize = 24;
 const MAX_CIPHERTEXT_BYTES: usize = 8192;
 const MAX_CALL_SIGNAL_CIPHERTEXT_BYTES: usize = 48 * 1024;
+const MAX_WS_MESSAGE_BYTES: usize = 96 * 1024;
+const MAX_WS_FRAME_BYTES: usize = 32 * 1024;
 
 /// Who should receive an event.
 ///
@@ -224,6 +226,10 @@ pub async fn websocket_handler(
         .ok_or(ApiError::Unauthorized)?;
     let user = consume_ws_ticket(&state.db, ticket).await?;
     Ok(websocket
+        // Sealed SDP is the largest realtime payload. Bound frames and complete
+        // messages before JSON parsing so a socket cannot reserve unbounded RAM.
+        .max_frame_size(MAX_WS_FRAME_BYTES)
+        .max_message_size(MAX_WS_MESSAGE_BYTES)
         .protocols([WS_PROTOCOL])
         .on_upgrade(move |socket| handle_socket(socket, state, user)))
 }
@@ -241,8 +247,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: AuthUser) {
             incoming = socket_rx.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(error) = process_socket_event(&state, &user, text.as_str()).await {
-                            warn!(?error, user_id = %user.id, "Rejected WebSocket event");
+                        if process_socket_event(&state, &user, text.as_str()).await.is_err() {
+                            // Event payloads are client-controlled. Keep the
+                            // audit signal without copying parser details or
+                            // attacker-crafted values into production logs.
+                            warn!(user_id = %user.id, "Rejected WebSocket event");
                         }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
@@ -312,6 +321,9 @@ async fn process_socket_event(
     user: &AuthUser,
     raw_event: &str,
 ) -> Result<(), ApiError> {
+    if raw_event.len() > MAX_WS_MESSAGE_BYTES {
+        return Err(ApiError::BadRequest("Realtime event is too large.".into()));
+    }
     let event: ClientEvent =
         serde_json::from_str(raw_event).map_err(|error| ApiError::BadRequest(error.to_string()))?;
 

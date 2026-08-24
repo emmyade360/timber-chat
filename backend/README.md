@@ -29,8 +29,10 @@ needs no lookup table and no server-assigned identifier.
 4. `POST /auth/register` or `POST /auth/login` exchanges the signature for a
    revocable, opaque bearer session valid for 15 minutes.
 
-Challenges are deleted on use, whether or not verification succeeds, so a nonce is
-strictly single-use.
+Challenges use a server-generated 32-byte CSPRNG nonce and are deleted only after
+a valid signature. An invalid request cannot consume or replace a live challenge
+for a public identity key; successful nonces are strictly single-use. Timber never
+stores, receives, or returns BIP39 words or word hashes.
 
 `POST /api/ws-ticket` exchanges a valid bearer for a one-time 60-second ticket.
 The browser offers it with the `timber-v1` WebSocket subprotocol; no long-lived
@@ -43,7 +45,9 @@ to an authenticated account. When `WEBRTC_TURN_SHARED_SECRET` is set, it returns
 ten-minute account-scoped coturn REST credential rather than a long-lived relay secret.
 `call.offer`, `call.answer`, `call.ice-candidate`, and `call.end` are authenticated
 WebSocket events. Each is authorized against an accepted 1:1 conversation, rate-limited,
-and relayed only to the other participant; signaling is neither stored nor logged.
+and relayed only to the other participant. SDP and ICE are sealed with the conversation
+key before relay; a pending encrypted setup record can exist for at most 60 seconds to
+wake an installed PWA, then is deleted. Plaintext signaling is neither stored nor logged.
 
 Audio/video itself does not enter this service. Browsers use WebRTC DTLS-SRTP directly,
 or encrypted through the configured TURN relay. Production needs explicit STUN/TURN

@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createMnemonic, deriveIdentity, isValidMnemonic, normalizeMnemonic, unknownWords } from "../../crypto/identity.js";
-import { MIN_PIN_LENGTH, createVault, importVaultTransfer, isValidPin, unlockVault } from "../../crypto/vault.js";
+import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, createVault, importVaultTransfer, isValidPin, unlockVault } from "../../crypto/vault.js";
 import { openSession } from "../../crypto/session.js";
 import { hasAccount, register, signIn } from "../../lib/auth.js";
 import { checkUsername, inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
@@ -202,7 +202,7 @@ function ImportTransfer({ onSubmit, onBack, busy, error }) {
       <textarea className="glass-input phrase-input" rows={5} autoComplete="off" spellCheck="false" placeholder="timber-vault/v1:…" value={transfer} onChange={(event) => setTransfer(event.target.value)} />
       <div className="field-group"><label className="field-label">Current device PIN</label><input className="glass-input" type="password" inputMode="numeric" pattern="[0-9]*" value={pin} onChange={(event) => setPin(event.target.value)} /></div>
       {error && <p className="form-error">{error}</p>}
-      <button className="btn-wood btn-block" disabled={!transfer.trim() || !isValidPin(pin) || busy} onClick={() => onSubmit(transfer, pin)}>{busy ? "Transferring…" : "Transfer securely"}</button>
+      <button className="btn-wood btn-block" disabled={!transfer.trim() || !pin || busy} onClick={() => onSubmit(transfer, pin)}>{busy ? "Transferring…" : "Transfer securely"}</button>
       <button className="btn-ghost btn-block" onClick={onBack}>Back</button>
     </>
   );
@@ -433,12 +433,13 @@ function SetPin({ onSubmit, onBack, busy, error }) {
       </p>
 
       <div className="field-group">
-        <label className="field-label">PIN (at least {MIN_PIN_LENGTH} digits)</label>
+        <label className="field-label">PIN ({MIN_PIN_LENGTH}–{MAX_PIN_LENGTH} digits)</label>
         <input
           className="glass-input"
           type="password"
           inputMode="numeric"
           pattern="[0-9]*"
+          maxLength={MAX_PIN_LENGTH}
           autoComplete="new-password"
           value={pin}
           onChange={(event) => setPin(event.target.value)}
@@ -451,6 +452,7 @@ function SetPin({ onSubmit, onBack, busy, error }) {
           type="password"
           inputMode="numeric"
           pattern="[0-9]*"
+          maxLength={MAX_PIN_LENGTH}
           autoComplete="new-password"
           value={again}
           onChange={(event) => setAgain(event.target.value)}

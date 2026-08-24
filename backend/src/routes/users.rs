@@ -142,6 +142,15 @@ pub async fn lookup_invite(
     State(state): State<AppState>,
     Path(code): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    if !state
+        .limits
+        .allow("invite-lookup-global", "all", 300, Duration::from_secs(60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many invite checks. Try again shortly.".into(),
+        ));
+    }
     let row: Option<(String, i16)> =
         sqlx::query_as("SELECT username, level FROM profiles WHERE invite_code = $1")
             .bind(code.trim().to_uppercase())
@@ -381,6 +390,18 @@ pub async fn check_username(
     State(state): State<AppState>,
     Path(username): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
+    // Registration happens before an account exists, so this endpoint cannot
+    // use an account-scoped limit. A modest global ceiling prevents unauthenticated
+    // username enumeration from becoming a database-amplification path.
+    if !state
+        .limits
+        .allow("username-check-global", "all", 300, Duration::from_secs(60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many username checks. Try again shortly.".into(),
+        ));
+    }
     let normalized = match crate::auth::normalize_username(&username) {
         Ok(value) => value,
         // A malformed name is simply unavailable, with the reason shown inline.

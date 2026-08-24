@@ -5,7 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useChatStore } from "../../store/chatStore.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import InvitePanel from "../../components/Invite/InvitePanel.jsx";
-import { MIN_PIN_LENGTH, changePin, exportVaultTransfer, isValidPin, unlockVault, wipeDevice } from "../../crypto/vault.js";
+import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, changePin, exportVaultTransfer, isValidPin, unlockVault, wipeDevice } from "../../crypto/vault.js";
 import {
   clearDigest,
   notificationSettings,
@@ -325,8 +325,9 @@ function ChangePin({ onClose }) {
               onChange={(event) => setCurrent(event.target.value)} />
           </div>
           <div className="field-group">
-            <label className="field-label">New PIN (at least {MIN_PIN_LENGTH} digits)</label>
+            <label className="field-label">New PIN ({MIN_PIN_LENGTH}–{MAX_PIN_LENGTH} digits)</label>
             <input className="glass-input" type="password" inputMode="numeric" pattern="[0-9]*" value={next}
+              maxLength={MAX_PIN_LENGTH}
               onChange={(event) => setNext(event.target.value)} />
           </div>
           {error && <p className="form-error">{error}</p>}

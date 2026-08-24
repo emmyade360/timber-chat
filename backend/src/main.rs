@@ -43,9 +43,10 @@ use sqlx::{
 use tokio::{signal, sync::{Mutex, broadcast}};
 use tower_http::{
     cors::CorsLayer,
-    trace::{DefaultMakeSpan, TraceLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
 };
-use tracing::{info, warn};
+use tracing::{info, info_span, warn};
 use uuid::Uuid;
 
 use routes::upload::MAX_UPLOAD_BYTES;
@@ -54,6 +55,7 @@ const EVENT_BUFFER_SIZE: usize = 512;
 const DEFAULT_DATABASE_MAX_CONNECTIONS: u32 = 5;
 const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(15);
 const DATABASE_CONNECT_ATTEMPTS: u8 = 3;
+const AUTH_BODY_LIMIT_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -138,6 +140,31 @@ fn database_max_connections() -> Result<u32, Box<dyn std::error::Error>> {
         return Err("DATABASE_MAX_CONNECTIONS must be greater than zero.".into());
     }
     Ok(max_connections)
+}
+
+/// Keep capability-like paths and personal handles out of application logs.
+/// Request query strings are never included, and dynamic route components are
+/// replaced with their route label before a tracing span is created.
+fn request_log_path(path: &str) -> &str {
+    if path.starts_with("/invites/") {
+        "/invites/:code"
+    } else if path.starts_with("/usernames/") {
+        "/usernames/:username"
+    } else if path.starts_with("/api/attachments/") {
+        "/api/attachments/:id"
+    } else if path.starts_with("/api/conversations/") {
+        "/api/conversations/:id"
+    } else if path.starts_with("/api/friends/requests/") {
+        "/api/friends/requests/:id/respond"
+    } else if path.starts_with("/api/friends/") {
+        "/api/friends/:id"
+    } else if path.starts_with("/api/explore/cards/") {
+        "/api/explore/cards/:id/action"
+    } else if path.starts_with("/api/users/") {
+        "/api/users/:id"
+    } else {
+        path
+    }
 }
 
 async fn connect_database(
@@ -238,7 +265,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_api = Router::new()
         .route("/challenge", post(auth::challenge))
         .route("/register", post(auth::register))
-        .route("/login", post(auth::login));
+        .route("/login", post(auth::login))
+        // Authentication requests consist solely of public keys and signatures.
+        // Keep malformed requests from claiming the attachment upload budget.
+        .layer(RequestBodyLimitLayer::new(AUTH_BODY_LIMIT_BYTES));
 
     let protected_api = Router::new()
         .route(
@@ -313,8 +343,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .layer(middleware::map_response(security_headers))
         // Authentication and WebSocket-ticket headers must never be emitted in
-        // request spans. This span contains method/URI/status only.
-        .layer(TraceLayer::new_for_http().make_span_with(DefaultMakeSpan::new().include_headers(false)))
+        // request spans. Dynamic path values and query strings are also redacted
+        // before logging, so invite capabilities and account metadata stay out
+        // of routine Render logs.
+        .layer(TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+            info_span!(
+                "http.request",
+                method = %request.method(),
+                path = request_log_path(request.uri().path()),
+            )
+        }))
         .with_state(state);
 
     let address: SocketAddr = format!("0.0.0.0:{port}").parse()?;
@@ -362,20 +400,56 @@ async fn shutdown_signal() {
 async fn security_headers(mut response: axum::response::Response) -> axum::response::Response {
     let headers = response.headers_mut();
     headers.insert("cache-control", "no-store".parse().expect("static header"));
+    headers.insert(
+        "strict-transport-security",
+        "max-age=63072000; includeSubDomains; preload"
+            .parse()
+            .expect("static header"),
+    );
     headers.insert("x-content-type-options", "nosniff".parse().expect("static header"));
     headers.insert("x-frame-options", "DENY".parse().expect("static header"));
+    headers.insert("x-xss-protection", "0".parse().expect("static header"));
+    headers.insert(
+        "x-permitted-cross-domain-policies",
+        "none".parse().expect("static header"),
+    );
     headers.insert("referrer-policy", "no-referrer".parse().expect("static header"));
     headers.insert(
+        "cross-origin-opener-policy",
+        "same-origin".parse().expect("static header"),
+    );
+    headers.insert(
+        "cross-origin-resource-policy",
+        "same-origin".parse().expect("static header"),
+    );
+    headers.insert(
+        "origin-agent-cluster",
+        "?1".parse().expect("static header"),
+    );
+    headers.insert(
         "permissions-policy",
-        "camera=(), microphone=(self), geolocation=(), payment=()"
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
             .parse()
             .expect("static header"),
     );
     headers.insert(
         "content-security-policy",
-        "default-src 'none'; frame-ancestors 'none'"
+        "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'"
             .parse()
             .expect("static header"),
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_log_path;
+
+    #[test]
+    fn request_spans_redact_capabilities_and_dynamic_account_paths() {
+        assert_eq!(request_log_path("/invites/ABCD1234"), "/invites/:code");
+        assert_eq!(request_log_path("/usernames/alice"), "/usernames/:username");
+        assert_eq!(request_log_path("/api/conversations/a/b"), "/api/conversations/:id");
+        assert_eq!(request_log_path("/health"), "/health");
+    }
 }

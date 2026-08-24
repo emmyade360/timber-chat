@@ -44,6 +44,8 @@ prompted secret environment values:
 | `WEBRTC_STUN_URLS` | Your comma-separated STUN URLs |
 | `WEBRTC_TURN_URLS` | Your UDP and TLS/TCP TURN URLs |
 | `WEBRTC_TURN_SHARED_SECRET` | Coturn `static-auth-secret` |
+| `WEB_PUSH_VAPID_PRIVATE_KEY` | URL-safe, unpadded private VAPID key (optional call alerts) |
+| `WEB_PUSH_VAPID_SUBJECT` | `mailto:` or HTTPS contact URI for VAPID (optional call alerts) |
 
 Leave `DATABASE_MAX_CONNECTIONS=5` unless the pooler's budget requires a lower
 number. Render supplies `PORT`; Timber binds to it on `0.0.0.0` automatically.
@@ -77,13 +79,16 @@ scaling.
    ```text
    VITE_API_URL=https://<your-Render-service>.onrender.com
    VITE_WS_URL=wss://<your-Render-service>.onrender.com
+   VITE_WEB_PUSH_PUBLIC_KEY=<matching-public-VAPID-key>
    ```
 
    Use your Render custom API domain instead if you configured one. Values must
    have no trailing slash.
 4. Deploy. [frontend/vercel.json](./frontend/vercel.json) supplies the Vite
    build command, SPA fallback, no-store policy, CSP, HSTS, clickjacking
-   protection, referrer policy, and camera/microphone permission policy.
+   protection, referrer policy, and camera/microphone permission policy. If you
+   change the API hostname, update the exact `connect-src` hosts in that file at
+   the same time; it intentionally does not permit arbitrary HTTPS/WSS origins.
 5. The supplied blueprint already configures `ALLOWED_ORIGINS` as
    `https://timbachat.vercel.app`. If a custom frontend domain is added, replace
    that value with the new exact origin and redeploy the API.
@@ -117,6 +122,10 @@ From a clean browser profile at the Vercel URL:
 - Keep database, Storage, and TURN credentials in their provider secret stores.
 - Rotate the Supabase service-role key and TURN shared secret through a planned
   deployment if either may have been exposed.
+- Rotate the database password, Supabase service-role key, TURN secret, and VAPID
+  private key immediately if they were pasted into chat, logs, screenshots, or a
+  source-control system. Remove obsolete `JWT_SECRET` variables: Timber does not
+  use JWTs.
 - Back up Supabase PostgreSQL and monitor database connection/pooler limits.
 - Keep the private `chat-files` bucket lifecycle cleanup enabled through the
   backend worker; do not add public bucket URLs.

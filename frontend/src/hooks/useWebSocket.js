@@ -15,6 +15,7 @@ import { getCurrentUser, getFriends } from "../lib/api.js";
 import { notifyIncoming } from "../lib/notifications.js";
 
 const MAX_BACKOFF_MS = 15_000;
+const MAX_REALTIME_EVENT_BYTES = 96 * 1024;
 
 export function useWebSocket(enabled) {
   const socketRef = useRef(null);
@@ -25,7 +26,9 @@ export function useWebSocket(enabled) {
 
   const send = useCallback((type, payload) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type, payload }));
+      const event = JSON.stringify({ type, payload });
+      if (event.length > MAX_REALTIME_EVENT_BYTES) return false;
+      socketRef.current.send(event);
       return true;
     }
     return false;
@@ -98,7 +101,17 @@ export function useWebSocket(enabled) {
       };
 
       socket.onmessage = async (event) => {
-        const { type, payload } = JSON.parse(event.data);
+        // Do not let a malformed or unexpectedly large relay event throw from
+        // the browser event loop. The server applies the matching wire bound.
+        if (typeof event.data !== "string" || event.data.length > MAX_REALTIME_EVENT_BYTES) return;
+        let decoded;
+        try {
+          decoded = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        const { type, payload } = decoded ?? {};
+        if (typeof type !== "string" || !payload || typeof payload !== "object") return;
         const store = useChatStore.getState();
 
         switch (type) {
@@ -136,6 +149,7 @@ export function useWebSocket(enabled) {
           case "call.offer":
           case "call.answer":
           case "call.ice-candidate":
+          case "call.ringing":
           case "call.end":
             // SDP and ICE candidates are transient call setup data. They are
             // delivered only to the call controller and never written locally.

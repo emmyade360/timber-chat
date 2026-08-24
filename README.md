@@ -51,6 +51,11 @@ never receives, records, or stores the audio/video media.
 messages they have copies of. The envelope carries a version field so a Double
 Ratchet can be added later without migrating stored data.
 
+**Authentication:** the server never stores or returns BIP39 words or word hashes.
+It issues a random, short-lived challenge that the recovery-derived Ed25519 key signs;
+successful challenges are single-use. Sessions are random opaque values stored only in
+browser memory, with a server-side digest for expiry and logout revocation.
+
 ## Security boundary
 
 Each X25519 chat key is signed by its Ed25519 account key. Clients verify that
@@ -122,6 +127,11 @@ or referrals. It is not a health score.
 For a production Render + Vercel deployment, follow [DEPLOYMENT.md](./DEPLOYMENT.md).
 It includes exact environment variables, CORS, health checks, TURN, smoke tests, and
 the current single-instance WebSocket scaling limit.
+
+If a database password, Supabase service-role key, TURN secret, VAPID private key, or
+backend environment file has ever been shared outside its secret store, rotate it in the
+provider first and replace the Render value before redeploying. Do not put credentials
+in any `VITE_*` variable: those values are intentionally public in browser bundles.
 
 ### Backend
 
