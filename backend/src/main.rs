@@ -148,8 +148,6 @@ fn database_max_connections() -> Result<u32, Box<dyn std::error::Error>> {
 fn request_log_path(path: &str) -> &str {
     if path.starts_with("/invites/") {
         "/invites/:code"
-    } else if path.starts_with("/usernames/") {
-        "/usernames/:username"
     } else if path.starts_with("/api/attachments/") {
         "/api/attachments/:id"
     } else if path.starts_with("/api/conversations/") {
@@ -271,6 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(RequestBodyLimitLayer::new(AUTH_BODY_LIMIT_BYTES));
 
     let protected_api = Router::new()
+        .route("/growth", get(routes::users::get_growth))
         .route(
             "/users/me",
             get(routes::users::get_current_user).patch(routes::users::update_current_user),
@@ -326,8 +325,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .route("/health", get(health))
-        .route("/growth", get(routes::users::get_growth))
-        .route("/usernames/{username}", get(routes::users::check_username))
         .route("/invites/{code}", get(routes::users::lookup_invite))
         .route("/ws", get(ws::websocket_handler))
         .nest("/auth", auth_api)
@@ -448,7 +445,6 @@ mod tests {
     #[test]
     fn request_spans_redact_capabilities_and_dynamic_account_paths() {
         assert_eq!(request_log_path("/invites/ABCD1234"), "/invites/:code");
-        assert_eq!(request_log_path("/usernames/alice"), "/usernames/:username");
         assert_eq!(request_log_path("/api/conversations/a/b"), "/api/conversations/:id");
         assert_eq!(request_log_path("/health"), "/health");
     }

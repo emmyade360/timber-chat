@@ -143,8 +143,9 @@ export const payloads = {
    * The record a call leaves behind in the conversation.
    *
    * Only the caller writes it, and only the caller amends it, so the two devices
-   * never race to describe the same call. Signalling itself is never stored by
-   * the server; this card is an ordinary sealed message like any other.
+   * never race to describe the same call. Setup signals are separately sealed
+   * and may be retained for at most 60 seconds to wake an installed recipient;
+   * this card is an ordinary sealed message like any other.
    */
   call: ({ callId, mode, status = "calling" }) => ({
     v: ENVELOPE_VERSION, t: "call", call_id: callId, mode, status,

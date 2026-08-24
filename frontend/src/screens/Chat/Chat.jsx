@@ -23,6 +23,44 @@ import { timeAgo } from "../../lib/time.js";
 
 const TYPING_IDLE_MS = 1500;
 const VOICE_NOTE_LIFETIME_MS = 24 * 60 * 60 * 1000;
+// The ciphertext adds a 24-byte nonce and an authentication tag. Leave enough
+// room for multipart framing below the relay's 10 MiB hard body limit.
+const MAX_ATTACHMENT_PLAINTEXT_BYTES = 9 * 1024 * 1024;
+const SAFE_ATTACHMENT_TYPES = new Set([
+  "application/pdf",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/ogg",
+  "audio/wav",
+  "audio/webm",
+  "audio/x-wav",
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/plain",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+]);
+const FILE_ACCEPT = [...SAFE_ATTACHMENT_TYPES].join(",");
+
+function attachmentType(file) {
+  return (file?.type ?? "").split(";", 1)[0].toLowerCase();
+}
+
+function safeDownloadName(value) {
+  const cleaned = String(value ?? "attachment")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .split("")
+    .map((character) => (character.charCodeAt(0) < 32 ? "_" : character))
+    .join("")
+    .trim()
+    .slice(0, 120);
+  return cleaned || "attachment";
+}
+
 function labelForPayload(payload) {
   if (payload?.t === "file") return payload.kind === "voice" ? "Voice note" : `Attachment: ${payload.name ?? "file"}`;
   if (payload?.t === "decision") return `${payload.kind === "poll" ? "Poll" : "Decision"}: ${payload.prompt}`;
@@ -156,8 +194,12 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
   const attachFile = async (file, kind = "file", durationMs = null) => {
     if (!file || !secure) return;
     setSendError("");
-    if (file.size > 10 * 1024 * 1024) {
-      setSendError("Files must be 10 MB or smaller.");
+    if (file.size > MAX_ATTACHMENT_PLAINTEXT_BYTES) {
+      setSendError("Files must be 9 MB or smaller.");
+      return;
+    }
+    if (!SAFE_ATTACHMENT_TYPES.has(attachmentType(file))) {
+      setSendError("For safety, attach a PDF, plain text, image, audio, or video file.");
       return;
     }
     try {
@@ -212,13 +254,15 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     try {
       const { data } = await downloadEncrypted(message.payload.attachment_id);
       const bytes = decryptFile(new Uint8Array(data), message.payload.key);
-      const blob = new Blob([bytes], { type: message.payload.mime || "application/octet-stream" });
+      // Never let a peer-controlled MIME type make a decrypted blob executable
+      // or inline-renderable. The browser receives a forced download instead.
+      const blob = new Blob([bytes], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = message.payload.name || "attachment";
+      link.download = safeDownloadName(message.payload.name);
       link.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch {
       setSendError("This encrypted attachment is unavailable or has expired.");
     }
@@ -316,7 +360,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
       {sendError && <p className="chat-send-error">{sendError}</p>}
       {replyTo && <div className="reply-bar"><span>Replying to {labelForPayload(replyTo.payload).slice(0, 70)}</span><button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
       <div className="composer">
-        <input ref={fileInput} className="sr-only" type="file" onChange={(event) => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
+        <input ref={fileInput} className="sr-only" type="file" accept={FILE_ACCEPT} onChange={(event) => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
         <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">＋</button>
         <button className={`composer-attach ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? "■" : "●"}</button>
         <input className="glass-input composer-input" placeholder="Say something…" value={text} onChange={(event) => handleChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} disabled={!secure} />

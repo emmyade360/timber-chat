@@ -5,7 +5,7 @@
 //! message volume, or time spent in the app.
 //!
 //! This table is the single source of truth. The frontend renders whatever
-//! `GET /growth` returns rather than keeping its own copy, so the two can never
+//! authenticated `GET /api/growth` returns rather than keeping its own copy, so the two can never
 //! drift apart.
 
 use serde::Serialize;

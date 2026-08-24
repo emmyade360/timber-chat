@@ -370,9 +370,9 @@ pub async fn get_user(
     .ok_or_else(|| ApiError::NotFound("User not found.".into()))
 }
 
-/// The complete connection-growth path. It is served rather than duplicated in the
-/// client, so every device describes a stage the same way.
-pub async fn get_growth() -> Json<Value> {
+/// The complete connection-growth path. It is protected rather than public so
+/// anonymous callers cannot scrape progression and daily-cap metadata.
+pub async fn get_growth(Extension(_user): Extension<AuthUser>) -> Json<Value> {
     Json(json!({
         "max_stage": levels::MAX_LEVEL,
         "stages": levels::LADDER,
@@ -383,44 +383,6 @@ pub async fn get_growth() -> Json<Value> {
             { "kind": "connection", "label": "A mutually accepted connection", "points": growth::POINTS_PER_CONNECTION, "daily_cap": GrowthKind::Connection.daily_cap() },
         ],
     }))
-}
-
-/// Whether a username is free, for live feedback on the claim screen.
-pub async fn check_username(
-    State(state): State<AppState>,
-    Path(username): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    // Registration happens before an account exists, so this endpoint cannot
-    // use an account-scoped limit. A modest global ceiling prevents unauthenticated
-    // username enumeration from becoming a database-amplification path.
-    if !state
-        .limits
-        .allow("username-check-global", "all", 300, Duration::from_secs(60))
-        .await
-    {
-        return Err(ApiError::TooManyRequests(
-            "Too many username checks. Try again shortly.".into(),
-        ));
-    }
-    let normalized = match crate::auth::normalize_username(&username) {
-        Ok(value) => value,
-        // A malformed name is simply unavailable, with the reason shown inline.
-        Err(ApiError::BadRequest(reason)) | Err(ApiError::Conflict(reason)) => {
-            return Ok(Json(json!({ "available": false, "reason": reason })));
-        }
-        Err(other) => return Err(other),
-    };
-
-    let taken: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM profiles WHERE username = $1)")
-        .bind(&normalized)
-        .fetch_one(&state.db)
-        .await?;
-
-    Ok(Json(json!({
-        "available": !taken,
-        "username": normalized,
-        "reason": if taken { "That username is already taken." } else { "" },
-    })))
 }
 
 #[cfg(test)]

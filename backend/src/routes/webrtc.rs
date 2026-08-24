@@ -70,9 +70,9 @@ fn rest_turn_credential(secret: &str, user: &AuthUser) -> (String, String, DateT
 }
 
 /// Return STUN/TURN configuration only after the caller has an authenticated
-/// Timber session. TURN credentials are ten-minute coturn REST credentials when
-/// `WEBRTC_TURN_SHARED_SECRET` is present; static credentials are supported only
-/// for managed TURN providers that do not support REST authentication.
+/// Timber session. Production TURN credentials are ten-minute coturn REST
+/// credentials derived from `WEBRTC_TURN_SHARED_SECRET`; a long-lived static
+/// relay credential would otherwise outlive the Timber browser session.
 pub async fn get_ice_servers(
     Extension(user): Extension<AuthUser>,
 ) -> Result<Json<IceServersResponse>, ApiError> {
@@ -94,6 +94,11 @@ pub async fn get_ice_servers(
             .ok()
             .filter(|secret| !secret.trim().is_empty());
         let using_rest_secret = rest_secret.is_some();
+        if env::var("RENDER").is_ok() && !using_rest_secret {
+            return Err(ApiError::Internal(
+                "Production TURN requires WEBRTC_TURN_SHARED_SECRET.".into(),
+            ));
+        }
         let (username, credential, expiry) = match rest_secret {
             Some(secret) => rest_turn_credential(&secret, &user),
             _ => (

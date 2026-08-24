@@ -17,7 +17,8 @@ secret.
    `DATABASE_MAX_CONNECTIONS` within the connection budget assigned by that
    pooler. Percent-encode special password characters.
 4. For reliable calls outside one local network, operate a STUN/TURN service.
-   Coturn with a `static-auth-secret` is the recommended setup.
+   Production requires coturn's `static-auth-secret` REST credential mode; Timber
+   will not issue a long-lived static TURN credential on Render.
 
 Never commit the backend `.env`, a Supabase service-role key, database URL, or
 TURN shared secret. `VITE_*` values are public build-time URLs, not secrets.

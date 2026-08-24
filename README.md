@@ -76,6 +76,17 @@ is unlocked can access the phrase and plaintext. The app locks after five minute
 idle (or 30 seconds in the background), but a native client with hardware-backed
 storage is required for stronger device-compromise resistance.
 
+Never paste the recovery phrase into another website, keep it out of screenshots
+and cloud clipboards, and use a browser profile without untrusted extensions.
+The transfer QR is a PIN-encrypted vault export, not a recovery phrase, but it is
+still sensitive and should be shown only to the new device and dismissed immediately.
+
+Attachments are sealed before upload and the relay stores only opaque bytes in a
+private bucket. Timber accepts a small client-side allowlist (PDF, plain text,
+common image/audio/video formats), serves the encrypted object as a forced download,
+and never renders a peer-provided MIME type. Server-side virus or magic-byte scanning
+would require decrypting the file and is therefore incompatible with this E2EE design.
+
 ## Private connection features
 
 Messages use versioned encrypted envelopes. The current client supports replies,
@@ -85,7 +96,7 @@ notes, quiet send, and encrypted scheduled delivery. Local search opens envelope
 demand and never writes a plaintext index to IndexedDB.
 
 One-to-one audio and video calls use WebRTC. The socket only carries authenticated,
-short-lived setup messages between accepted friends; media uses WebRTC's DTLS-SRTP
+short-lived, encrypted setup messages between accepted friends; media uses WebRTC's DTLS-SRTP
 transport directly between browsers, or passes through the configured TURN relay still
 encrypted in transit. Audio starts as mono, noise-suppressed Opus capped at 32 kbps.
 Video is opt-in and starts at 360p/15fps capped at 350 kbps. WebRTC setup can expose

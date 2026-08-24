@@ -13,6 +13,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{Duration as ChronoDuration, Utc};
+use futures_util::StreamExt;
 use serde::Serialize;
 use std::time::Duration;
 use tracing::warn;
@@ -58,6 +59,16 @@ pub async fn upload_file(
     }
     if bytes.len() > MAX_UPLOAD_BYTES {
         return Err(ApiError::BadRequest("Files must be 10 MB or smaller.".into()));
+    }
+    if multipart
+        .next_field()
+        .await
+        .map_err(|_| ApiError::BadRequest("Could not read the uploaded file.".into()))?
+        .is_some()
+    {
+        return Err(ApiError::BadRequest(
+            "Upload exactly one encrypted file at a time.".into(),
+        ));
     }
 
     cleanup_expired_attachments(&state).await;
@@ -154,15 +165,29 @@ pub async fn download_file(
             "Encrypted attachment exceeded the permitted size.".into(),
         ));
     }
-    let bytes = upstream
-        .bytes()
-        .await
-        .map_err(|error| ApiError::Upstream(error.to_string()))?;
+    // Content-Length is optional for a chunked response, so bound streaming
+    // reads too. This avoids buffering an unexpectedly large storage object in
+    // the API process before rejecting it.
+    let mut body = upstream.bytes_stream();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk.map_err(|error| ApiError::Upstream(error.to_string()))?;
+        if chunk.len() > MAX_UPLOAD_BYTES.saturating_sub(bytes.len()) {
+            return Err(ApiError::Upstream(
+                "Encrypted attachment exceeded the permitted size.".into(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     Ok((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
             (header::CACHE_CONTROL, "no-store"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"timber-encrypted-attachment\"",
+            ),
         ],
         bytes,
     )

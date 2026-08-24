@@ -153,7 +153,7 @@ export const sendFriendRequest = (receiverId) =>
 export const respondToFriendRequest = (requestId, approve) =>
   api.post(`/api/friends/requests/${requestId}/respond`, { approve });
 export const removeFriend = (friendId) => api.delete(`/api/friends/${friendId}`);
-export const getGrowth = () => api.get("/growth");
+export const getGrowth = () => api.get("/api/growth");
 export const getInvite = () => api.get("/api/invite");
 export const lookupInvite = (code) => api.get(`/invites/${encodeURIComponent(code)}`);
 
@@ -170,8 +170,6 @@ export function inviteCodeFromUrl() {
   const fromQuery = new URLSearchParams(window.location.search).get("invite");
   return (fromQuery ?? "").trim().toUpperCase() || null;
 }
-export const checkUsername = (username) =>
-  api.get(`/usernames/${encodeURIComponent(username)}`);
 export const createWebSocketTicket = () => api.post("/api/ws-ticket");
 export const getWebRtcIceServers = () => api.get("/api/webrtc/ice-servers");
 export const getPendingCalls = () => api.get("/api/calls/pending");

@@ -99,4 +99,6 @@ so tampering with routing or attribution is detectable by the recipient.
 Used for Postgres and object storage only — **not** for authentication. The
 `chat-files` bucket must be private. Uploads are encrypted before they arrive,
 stored as `application/octet-stream` under random names, and downloaded only via
-an authenticated conversation-participant route.
+an authenticated conversation-participant route with `Content-Disposition: attachment`.
+The relay cannot magic-byte scan or virus-scan an E2EE ciphertext blob without
+breaking the non-custodial model.

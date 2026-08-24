@@ -10,7 +10,7 @@ import { createMnemonic, deriveIdentity, isValidMnemonic, normalizeMnemonic, unk
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, createVault, importVaultTransfer, isValidPin, unlockVault } from "../../crypto/vault.js";
 import { openSession } from "../../crypto/session.js";
 import { hasAccount, register, signIn } from "../../lib/auth.js";
-import { checkUsername, inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
+import { inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
 
 const CONFIRM_COUNT = 3;
@@ -91,7 +91,7 @@ export default function Onboarding({ onReady }) {
             <span>
               <strong>@{inviter.username}</strong> invited you to Timber.
               <span className="invite-banner-sub">
-                Join and you both earn XP — they get {"1,000"}, you start with {inviter.welcome_xp}.
+                Joining starts a private connection; invite links do not award growth points.
               </span>
             </span>
           </div>
@@ -361,29 +361,15 @@ function ImportPhrase({ onSubmit, onBack, busy, error }) {
 
 function ClaimUsername({ onClaimed, onBack }) {
   const [username, setUsername] = useState("");
-  const [status, setStatus] = useState(null);
-  const [checking, setChecking] = useState(false);
-
-  const verify = async (value) => {
-    setUsername(value);
-    setStatus(null);
-    if (value.trim().length < 3) return;
-    setChecking(true);
-    try {
-      const { data } = await checkUsername(value.trim());
-      setStatus(data);
-    } catch {
-      setStatus(null);
-    } finally {
-      setChecking(false);
-    }
-  };
+  const normalized = username.trim().toLowerCase();
+  const valid = /^[a-z0-9_]{3,20}$/.test(normalized);
 
   return (
     <>
       <h2 className="onboard-title">Choose your username</h2>
       <p className="onboard-lede">
         This is how friends find you. It is claimed once and cannot be changed.
+        Availability is checked privately when you create the account.
       </p>
 
       <div className="field-group">
@@ -397,20 +383,18 @@ function ClaimUsername({ onClaimed, onBack }) {
             spellCheck="false"
             placeholder="your_name"
             value={username}
-            onChange={(event) => verify(event.target.value)}
+            onChange={(event) => setUsername(event.target.value)}
           />
         </div>
-        {checking && <p className="field-hint">Checking…</p>}
-        {status?.available === true && <p className="field-ok">@{status.username} is available</p>}
-        {status?.available === false && <p className="form-error">{status.reason}</p>}
+        {username && !valid && <p className="form-error">Use 3–20 lowercase letters, numbers, or underscores.</p>}
       </div>
 
       <button
         className="btn-wood btn-block"
-        disabled={!status?.available}
-        onClick={() => onClaimed(status.username)}
+        disabled={!valid}
+        onClick={() => onClaimed(normalized)}
       >
-        Claim it
+        Continue
       </button>
       <button className="btn-ghost btn-block" onClick={onBack}>
         Back

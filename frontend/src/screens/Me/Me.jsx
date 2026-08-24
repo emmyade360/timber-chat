@@ -39,9 +39,12 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
           Growth stage {me.level} · {me.level_name}
         </p>
 
-        <div className="growth-bar" role="progressbar" aria-label="Growth progress" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-          <div className="growth-bar-fill" style={{ width: `${atMax ? 100 : percent}%` }} />
-        </div>
+        <progress
+          className="growth-bar"
+          aria-label="Growth progress"
+          value={atMax ? 100 : percent}
+          max="100"
+        />
         <p className="growth-caption">
           {atMax
             ? `${me.growth_points.toLocaleString()} growth points — your path is complete.`

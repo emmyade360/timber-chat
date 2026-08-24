@@ -138,7 +138,9 @@ export default function LevelBadge({ level = 1, size = 48, showNumber = false, c
           fontSize="30"
           fontWeight="700"
           fill={palette.edge}
-          style={{ paintOrder: "stroke", stroke: palette.core, strokeWidth: 4 }}
+          paintOrder="stroke"
+          stroke={palette.core}
+          strokeWidth="4"
         >
           {tier}
         </text>

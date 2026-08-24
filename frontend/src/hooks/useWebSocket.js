@@ -161,8 +161,8 @@ export function useWebSocket(enabled) {
             store.showLevelUp(payload);
             break;
           case "referral.joined":
-            // Someone accepted an invite; refresh so the profile XP and the new
-            // auto-friendship both appear without a reload.
+            // Someone accepted an invite; refresh so the new auto-friendship
+            // appears without a reload. Invites never award growth points.
             try {
               store.setFriends((await getFriends()).data);
               store.setMe((await getCurrentUser()).data);
