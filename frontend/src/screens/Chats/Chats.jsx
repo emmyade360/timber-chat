@@ -14,7 +14,7 @@ function previewText(preview) {
   return preview.payload?.body ?? "";
 }
 
-export default function Chats({ onOpen, onFindPeople, onInvite }) {
+export default function Chats({ onOpen, onFindPeople, onInvite, activeConversationId = null }) {
   const { conversations, unread, onlineUsers, syncing } = useChatStore();
   const [query, setQuery] = useState("");
   const visibleConversations = filterConversations(conversations, query);
@@ -73,7 +73,11 @@ export default function Chats({ onOpen, onFindPeople, onInvite }) {
           const online = onlineUsers.has(conversation.peerId);
           return (
             <li key={conversation.id}>
-              <button className="chat-row" onClick={() => onOpen(conversation.id)}>
+              <button
+                className={`chat-row ${conversation.id === activeConversationId ? "chat-row--active" : ""}`}
+                aria-current={conversation.id === activeConversationId ? "true" : undefined}
+                onClick={() => onOpen(conversation.id)}
+              >
                 <span className={`avatar ${online ? "avatar--online" : ""}`}>
                   {conversation.peerUsername?.[0]?.toUpperCase() ?? "?"}
                 </span>

@@ -7,18 +7,37 @@ use axum::{
     Json,
     extract::{Extension, Path, Query, State},
 };
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use serde::Deserialize;
 use sqlx::PgPool;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::{
     AppState,
     auth::AuthUser,
     error::ApiError,
-    models::{Conversation, ConversationRow, HistoryQuery, MessageRow, StoredMessage},
+    models::{
+        Conversation, ConversationRow, HistoryQuery, MessageReceipt, MessageRow, StoredMessage,
+    },
 };
 
 const DEFAULT_PAGE: i64 = 50;
 const MAX_PAGE: i64 = 200;
+/// A receipt row is ~120 bytes, so a generous cap is still a small response.
+const MAX_RECEIPTS: i64 = 500;
+/// Receipts older than this are settled; re-checking them forever is waste.
+const RECEIPT_WINDOW_DAYS: i64 = 7;
+
+#[derive(Deserialize)]
+pub struct ReceiptQuery {
+    pub since: Option<DateTime<Utc>>,
+}
+
+#[derive(Deserialize)]
+pub struct MarkReadInput {
+    pub message_ids: Vec<Uuid>,
+}
 
 /// Confirm the caller is one of the two participants, and return the other one.
 pub async fn require_participant(
@@ -113,36 +132,90 @@ pub async fn get_messages(
     Ok(Json(rows.into_iter().map(StoredMessage::from).collect()))
 }
 
-/// Mark a message read and tell the sender.
+/// Receipt state for the caller's own recent messages.
+///
+/// History deliberately skips messages a device already holds, which is exactly
+/// the set whose receipts need repairing after the sender was offline while the
+/// peer read them. This is the only path by which those ticks catch up. It
+/// returns ids and two timestamps -- no ciphertext, nothing about content.
+pub async fn get_receipts(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Path(conversation_id): Path<Uuid>,
+    Query(query): Query<ReceiptQuery>,
+) -> Result<Json<Vec<MessageReceipt>>, ApiError> {
+    require_participant(&state.db, conversation_id, user.id).await?;
+    let since = query
+        .since
+        .unwrap_or_else(|| Utc::now() - ChronoDuration::days(RECEIPT_WINDOW_DAYS));
+
+    let rows = sqlx::query_as::<_, MessageReceipt>(
+        r#"
+        SELECT m.id, m.delivered_at,
+               (
+                   SELECT r.created_at FROM read_receipts r
+                   WHERE r.message_id = m.id AND r.user_id <> m.sender_id
+                   LIMIT 1
+               ) AS read_at
+        FROM messages m
+        WHERE m.conversation_id = $1
+          AND m.sender_id = $2
+          AND m.created_at > $3
+        ORDER BY m.created_at DESC
+        LIMIT $4
+        "#,
+    )
+    .bind(conversation_id)
+    .bind(user.id)
+    .bind(since)
+    .bind(MAX_RECEIPTS)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(rows))
+}
+
+/// Mark messages read and tell the sender.
+///
+/// Batched, and durable in a way the WebSocket is not: this is what the client
+/// falls back to when the socket is down, where a receipt would otherwise be
+/// lost with no way to retry it.
 pub async fn mark_read(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
-    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+    Path(conversation_id): Path<Uuid>,
+    Json(input): Json<MarkReadInput>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    if !state
+        .limits
+        .allow("http-receipt", user.id, 30, Duration::from_secs(60))
+        .await
+    {
+        return Err(ApiError::TooManyRequests(
+            "Too many read receipts. Try again shortly.".into(),
+        ));
+    }
+    if input.message_ids.is_empty() {
+        return Ok(Json(serde_json::json!({ "success": true })));
+    }
+    if input.message_ids.len() > MAX_RECEIPTS as usize {
+        return Err(ApiError::BadRequest(
+            "Too many read receipts in one batch.".into(),
+        ));
+    }
     let peer = require_participant(&state.db, conversation_id, user.id).await?;
+    let read =
+        crate::ws::record_read_receipts(&state.db, conversation_id, user.id, &input.message_ids)
+            .await?;
 
-    let inserted = sqlx::query(
-        r#"
-        INSERT INTO read_receipts (message_id, user_id)
-        SELECT $1, $2
-        WHERE EXISTS (SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $3)
-        ON CONFLICT DO NOTHING
-        "#,
-    )
-    .bind(message_id)
-    .bind(user.id)
-    .bind(conversation_id)
-    .execute(&state.db)
-    .await?;
-
-    if inserted.rows_affected() > 0 {
+    if !read.is_empty() {
         crate::ws::publish(
             &state,
             crate::ws::EventTarget::User(peer),
             "receipt.read",
             serde_json::json!({
                 "conversation_id": conversation_id,
-                "message_id": message_id,
+                "message_ids": read,
                 "user_id": user.id,
             }),
         );

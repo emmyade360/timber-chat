@@ -8,17 +8,22 @@
 
 const BANDS = [
   // upTo, core, ring, edge, glow
-  { upTo: 2,  core: "#3E2415", ring: "#5C3317", edge: "#7A4A24", glow: "none" },
-  { upTo: 4,  core: "#4A2C18", ring: "#6E421F", edge: "#8B5E3C", glow: "none" },
-  { upTo: 6,  core: "#5C3317", ring: "#8B5E3C", edge: "#A9713F", glow: "none" },
-  { upTo: 8,  core: "#6E421F", ring: "#A9713F", edge: "#C49A6C", glow: "none" },
-  { upTo: 10, core: "#7A4A24", ring: "#C49A6C", edge: "#D4894A", glow: "none" },
-  { upTo: 12, core: "#8B5E3C", ring: "#D4894A", edge: "#E8C99A", glow: "#D4894A" },
-  { upTo: 14, core: "#7C2D1A", ring: "#C25A2E", edge: "#E8A05A", glow: "#C25A2E" },
-  { upTo: 16, core: "#6B1F2E", ring: "#B0413F", edge: "#E0855F", glow: "#B0413F" },
-  { upTo: 18, core: "#8A4B12", ring: "#D99A2B", edge: "#F5D98A", glow: "#D99A2B" },
-  { upTo: 19, core: "#9A6410", ring: "#F0B23C", edge: "#FFE9A8", glow: "#F0B23C" },
-  { upTo: 20, core: "#3F4A55", ring: "#8FA3B5", edge: "#D3E1EC", glow: "#8FA3B5" },
+  //
+  // Re-tuned for neutral dark surfaces. The walk is the same idea as before --
+  // dim and cool at the start, warming through amber, cresting at crystal --
+  // but the low tiers no longer disappear into a brown background, because the
+  // background is no longer brown.
+  { upTo: 2,  core: "#2B2D31", ring: "#4E5058", edge: "#6D7079", glow: "none" },
+  { upTo: 4,  core: "#33363C", ring: "#5C6069", edge: "#7C8089", glow: "none" },
+  { upTo: 6,  core: "#3A3D44", ring: "#6E727C", edge: "#949BA4", glow: "none" },
+  { upTo: 8,  core: "#44403F", ring: "#8A7F72", edge: "#B0A292", glow: "none" },
+  { upTo: 10, core: "#4E4436", ring: "#A08A64", edge: "#C7AE84", glow: "none" },
+  { upTo: 12, core: "#5A4A2E", ring: "#C09A5C", edge: "#E2C48C", glow: "#C09A5C" },
+  { upTo: 14, core: "#63421F", ring: "#D4894A", edge: "#F0B478", glow: "#D4894A" },
+  { upTo: 16, core: "#6B3524", ring: "#DD7A4C", edge: "#F5A97B", glow: "#DD7A4C" },
+  { upTo: 18, core: "#7A4A12", ring: "#E9A93A", edge: "#FBD98F", glow: "#E9A93A" },
+  { upTo: 19, core: "#8A6410", ring: "#F5C242", edge: "#FFE9A8", glow: "#F5C242" },
+  { upTo: 20, core: "#3F4A55", ring: "#9FB3C5", edge: "#DCE8F2", glow: "#9FB3C5" },
   { upTo: 21, core: "#1F4E5F", ring: "#7FD8E8", edge: "#EAFDFF", glow: "#7FD8E8" },
 ];
 
@@ -27,7 +32,7 @@ function paletteFor(level) {
   return BANDS.find((band) => clamped <= band.upTo) ?? BANDS[BANDS.length - 1];
 }
 
-export default function LevelBadge({ level = 1, size = 48, showNumber = false, className = "" }) {
+export default function LevelBadge({ level = 1, size = 48, name = null, className = "" }) {
   const tier = Math.min(Math.max(level ?? 1, 1), 21);
   const palette = paletteFor(tier);
   const id = `badge-${tier}-${size}`;
@@ -54,7 +59,7 @@ export default function LevelBadge({ level = 1, size = 48, showNumber = false, c
       height={size}
       className={`level-badge ${className}`}
       role="img"
-      aria-label={`Growth stage ${tier}`}
+      aria-label={name ? `${name} growth stage` : "Growth stage"}
     >
       <defs>
         <radialGradient id={`${id}-core`} cx="38%" cy="32%">
@@ -129,22 +134,6 @@ export default function LevelBadge({ level = 1, size = 48, showNumber = false, c
         <ellipse cx="36" cy="30" rx="16" ry="10" fill="#fff" opacity="0.13" transform="rotate(-28 36 30)" />
       </g>
 
-      {showNumber && (
-        <text
-          x="50"
-          y="50"
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontSize="30"
-          fontWeight="700"
-          fill={palette.edge}
-          paintOrder="stroke"
-          stroke={palette.core}
-          strokeWidth="4"
-        >
-          {tier}
-        </text>
-      )}
     </svg>
   );
 }
@@ -152,8 +141,8 @@ export default function LevelBadge({ level = 1, size = 48, showNumber = false, c
 /** Compact inline badge + name, for chat headers and list rows. */
 export function LevelChip({ level, name, size = 16 }) {
   return (
-    <span className="level-chip" title={`Growth stage ${level} — ${name ?? ""}`}>
-      <LevelBadge level={level} size={size} />
+    <span className="level-chip" title={name ?? "Growth stage"}>
+      <LevelBadge level={level} size={size} name={name} />
       <span className="level-chip-name">{name}</span>
     </span>
   );

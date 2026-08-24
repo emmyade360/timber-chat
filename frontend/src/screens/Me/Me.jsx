@@ -1,10 +1,19 @@
-// Settings: progression, privacy, notifications, device continuity, and account safety.
+// Settings.
+//
+// An organised list rather than a page of stacked panels: every row is a tinted
+// icon, a label, and one trailing element that says what the row does. The long
+// content -- the twenty-one stage ladder, the invite panel, the device transfer
+// -- lives on its own subpage, so the root stays scannable and the reader is
+// never scrolling past a wall of explanation to reach a switch.
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useChatStore } from "../../store/chatStore.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import GrowthBar from "../../components/Level/GrowthBar.jsx";
 import InvitePanel from "../../components/Invite/InvitePanel.jsx";
+import { SettingsGroup, SettingsRow, SettingsSwitch } from "../../components/Settings/SettingsList.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, changePin, exportVaultTransfer, isValidPin, unlockVault, wipeDevice } from "../../crypto/vault.js";
 import {
   clearDigest,
@@ -13,68 +22,131 @@ import {
   requestNotificationPermission,
   updateNotificationSettings,
 } from "../../lib/notifications.js";
-import { callAlertsEnabled, disableCallAlerts, enableCallAlerts, pushSupported } from "../../lib/push.js";
+import { disablePushAlerts, enablePushAlerts, pushAlertsEnabled, pushSupported } from "../../lib/push.js";
 import { getHealth } from "../../lib/api.js";
+import Modal from "../../components/Modal.jsx";
 
 export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped }) {
   const { me, ladder } = useChatStore();
   const [panel, setPanel] = useState(null);
+  const [page, setPage] = useState("root");
 
   if (!me) return <div className="screen"><div className="empty-state">Loading…</div></div>;
 
-  const span = me.growth_for_stage || 1;
-  const percent = Math.min(100, Math.round((me.growth_into_stage / span) * 100));
-  const atMax = !me.next_level_name;
+  if (page === "growth") return <GrowthPage me={me} ladder={ladder} onBack={() => setPage("root")} />;
+  if (page === "invite") return <SubPage title="Invite friends" onBack={() => setPage("root")}><InvitePanel /></SubPage>;
+  if (page === "transfer") return <TransferPage onBack={() => setPage("root")} />;
 
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="screen-header-action" onClick={onBack} aria-label="Back to profile">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">‹</button>
         <h1 className="screen-title">Settings</h1>
       </header>
 
-      <section className="profile-hero">
-        <LevelBadge level={me.level} size={104} />
-        <h2 className="profile-name">@{me.username}</h2>
-        <p className="profile-level">
-          Growth stage {me.level} · {me.level_name}
-        </p>
+      <div className="settings-identity">
+        <LevelBadge level={me.level} size={54} />
+        <div className="settings-identity-text">
+          <span className="settings-identity-name">@{me.username}</span>
+          <span className="settings-identity-sub">{me.level_name}</span>
+        </div>
+      </div>
 
-        <progress
-          className="growth-bar"
-          aria-label="Growth progress"
-          value={atMax ? 100 : percent}
-          max="100"
+      <SettingsGroup title="Growth">
+        <SettingsRow
+          icon={Icons.growth}
+          tint="green"
+          title="Your growth path"
+          subtitle={me.next_level_name ? `${me.level_name} — growing towards ${me.next_level_name}` : `${me.level_name} — your path is complete`}
+          onClick={() => setPage("growth")}
         />
-        <p className="growth-caption">
-          {atMax
-            ? `${me.growth_points.toLocaleString()} growth points — your path is complete.`
-            : `${me.growth_into_stage.toLocaleString()} / ${me.growth_for_stage.toLocaleString()} growth · ${me.growth_to_next.toLocaleString()} to ${me.next_level_name}`}
-        </p>
+        <SettingsRow
+          icon={Icons.invite}
+          tint="amber"
+          title="Invite friends"
+          subtitle="Start an encrypted conversation with someone you trust"
+          onClick={() => setPage("invite")}
+        />
+      </SettingsGroup>
 
+      <NotificationGroup />
+
+      <SettingsGroup
+        title="Privacy"
+        footnote="Chats are private and encrypted. Explore is separate, opt-in public profile data for finding friends; it never uses device location or open DMs."
+      >
+        <SettingsRow
+          icon={Icons.compass}
+          tint="teal"
+          title="Explore privacy"
+          subtitle="Manage your opt-in public card"
+          onClick={onOpenExplore}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="This device">
+        <SettingsRow
+          icon={Icons.install}
+          tint="wood"
+          title="Install Timber"
+          subtitle="A focused, full-screen app"
+          onClick={onOpenInstall}
+        />
+        <SettingsRow
+          icon={Icons.transfer}
+          tint="wood"
+          title="Transfer to a new device"
+          subtitle="Move your encrypted vault across"
+          onClick={() => setPage("transfer")}
+        />
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Account & security"
+        footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it."
+      >
+        <SettingsRow icon={Icons.key} tint="amber" title="Recovery phrase" subtitle="Twelve words that are your account" onClick={() => setPanel("phrase")} />
+        <SettingsRow icon={Icons.pin} tint="wood" title="Change PIN" subtitle={`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`} onClick={() => setPanel("pin")} />
+        <SettingsRow icon={Icons.lock} tint="wood" title="Lock Timber" subtitle="Require your PIN to come back" action onClick={onSignOut} />
+      </SettingsGroup>
+
+      <BuildGroup />
+
+      <SettingsGroup>
+        <SettingsRow icon={Icons.trash} tint="danger" title="Remove this device" subtitle="Erase this device’s copy of your account" destructive action onClick={() => setPanel("wipe")} />
+      </SettingsGroup>
+
+      {panel === "phrase" && <RevealPhrase onClose={() => setPanel(null)} />}
+      {panel === "pin" && <ChangePin onClose={() => setPanel(null)} />}
+      {panel === "wipe" && <WipeDevice onClose={() => setPanel(null)} onWiped={onWiped} />}
+    </div>
+  );
+}
+
+/** A drilled-into settings page: same header treatment, one topic. */
+function SubPage({ title, onBack, children }) {
+  return (
+    <div className="screen">
+      <header className="screen-header">
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to settings">‹</button>
+        <h1 className="screen-title">{title}</h1>
+      </header>
+      {children}
+    </div>
+  );
+}
+
+/** The full ladder and how growth is earned. Long, so it gets its own page. */
+function GrowthPage({ me, ladder, onBack }) {
+  return (
+    <SubPage title="Your growth path" onBack={onBack}>
+      <section className="profile-hero">
+        <GrowthBar me={me} variant="hero" badgeSize={96} />
         <div className="stat-row">
           <Stat label="Growth" value={me.growth_points.toLocaleString()} />
           <Stat label="Steady days" value={me.streak_days} />
-          <Stat label="Stage" value={`${me.level}/21`} />
         </div>
       </section>
-
-      <InvitePanel />
-
-      <section className="panel">
-        <h3 className="section-title">Privacy & discovery</h3>
-        <p className="panel-note">Chats are private and encrypted. Explore is separate, opt-in public profile data for finding friends; it never uses device location or open DMs.</p>
-        <button className="btn-ghost btn-block" onClick={onOpenExplore}>Manage Explore privacy</button>
-      </section>
-
-      <NotificationControls />
-      <CallAlertControls />
-      <section className="panel">
-        <h3 className="section-title">Timber app</h3>
-        <p className="panel-note">Install Timber for a focused full-screen experience. Installation never changes how your encrypted data is stored.</p>
-        <button className="btn-ghost btn-block" onClick={onOpenInstall}>Install Timber</button>
-      </section>
-      <DeviceContinuity />
 
       {ladder?.practices && (
         <section className="panel">
@@ -99,65 +171,170 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
       )}
 
       {ladder?.stages && (
-        <section className="panel">
-          <h3 className="section-title">Your growth path</h3>
-          <ol className="ladder">
-            {ladder.stages.map((tier) => {
-              const reached = me.level >= tier.level;
-              const current = me.level === tier.level;
-              return (
-                <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`}>
-                  <LevelBadge level={tier.level} size={30} />
-                  <span className="ladder-name">{tier.name}</span>
-                  <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
-                  {current && <span className="ladder-you">you</span>}
-                </li>
-              );
-            })}
-          </ol>
-        </section>
+        <ol className="ladder">
+          {ladder.stages.map((tier) => {
+            const reached = me.level >= tier.level;
+            const current = me.level === tier.level;
+            return (
+              <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`}>
+                <LevelBadge level={tier.level} size={30} />
+                <span className="ladder-name">{tier.name}</span>
+                <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
+                {current && <span className="ladder-you">you</span>}
+              </li>
+            );
+          })}
+        </ol>
       )}
+    </SubPage>
+  );
+}
 
+function TransferPage({ onBack }) {
+  const [transfer, setTransfer] = useState("");
+  const [notice, setNotice] = useState("");
+  return (
+    <SubPage title="Transfer device" onBack={onBack}>
       <section className="panel">
-        <h3 className="section-title">Account & security</h3>
         <p className="panel-note">
-          Timber has no password and no email. Your twelve-word phrase is the only way
-          back in — keep it somewhere safe and never share it.
+          {navigator.onLine ? "Sync is available: " : "You are offline: "}
+          Timber restores encrypted ciphertext after you sign in on another device. The
+          server cannot open it.
         </p>
-        <button className="btn-ghost btn-block" onClick={() => setPanel("phrase")}>
-          Show recovery phrase
-        </button>
-        <button className="btn-ghost btn-block" onClick={() => setPanel("pin")}>
-          Change PIN
-        </button>
-        <button className="btn-ghost btn-block" onClick={onSignOut}>
-          Lock Timber
-        </button>
-        <button className="btn-danger btn-block" onClick={() => setPanel("wipe")}>
-          Remove this device
-        </button>
+        {!transfer ? (
+          <button className="btn-wood btn-block" onClick={async () => {
+            try { setTransfer(await exportVaultTransfer()); }
+            catch { setNotice("Could not prepare the encrypted transfer code. Try again while Timber is unlocked."); }
+          }}>Show encrypted transfer QR</button>
+        ) : (
+          <>
+            <div className="safety-qr" aria-label="Encrypted device transfer QR code"><QRCodeSVG value={transfer} size={176} includeMargin /></div>
+            <p className="onboard-warning">
+              This QR is an encrypted copy of your device vault, not your recovery phrase.
+              Treat it like a password export: show it only to your new device, which must
+              also enter this device’s current PIN.
+            </p>
+            <button className="btn-ghost btn-block" onClick={async () => {
+              try { await navigator.clipboard.writeText(transfer); setNotice("Encrypted transfer code copied."); }
+              catch { setNotice("Copy is unavailable in this browser; scan the QR on your new device."); }
+            }}>Copy encrypted transfer code</button>
+            <button className="btn-ghost btn-block" onClick={() => setTransfer("")}>Hide transfer code</button>
+          </>
+        )}
+        {notice && <p className="field-ok">{notice}</p>}
       </section>
+    </SubPage>
+  );
+}
 
-      <section className="panel">
-        <h3 className="section-title">About</h3>
-        <BuildInfo />
-      </section>
+/**
+ * Notification preferences.
+ *
+ * The master switch is what asks the browser for permission; the rows beneath
+ * it only appear once it is on, because a switch that cannot take effect is
+ * worse than an absent one.
+ */
+function NotificationGroup() {
+  const [settings, setSettings] = useState({ enabled: false, digest: false, checkIns: false });
+  const [digestCount, setDigestCount] = useState(0);
+  const [calls, setCalls] = useState(false);
+  const [notice, setNotice] = useState("");
 
-      {panel === "phrase" && <RevealPhrase onClose={() => setPanel(null)} />}
-      {panel === "pin" && <ChangePin onClose={() => setPanel(null)} />}
-      {panel === "wipe" && <WipeDevice onClose={() => setPanel(null)} onWiped={onWiped} />}
-    </div>
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const [saved, count, callAlerts] = await Promise.all([
+          notificationSettings(),
+          pendingDigestCount(),
+          pushAlertsEnabled().catch(() => false),
+        ]);
+        if (!live) return;
+        setSettings(saved);
+        setDigestCount(count);
+        setCalls(callAlerts);
+      } catch { /* preferences are optional */ }
+    })();
+    return () => { live = false; };
+  }, []);
+
+  const patch = async (next) => setSettings(await updateNotificationSettings(next));
+
+  const toggleMaster = async (on) => {
+    setNotice("");
+    if (!on) { await patch({ enabled: false }); return; }
+    try { setSettings(await requestNotificationPermission()); }
+    catch { setNotice("Notifications are unavailable or were not allowed by this browser."); }
+  };
+
+  const toggleCalls = async (on) => {
+    setNotice("");
+    try {
+      if (on) { await enablePushAlerts(); setCalls(true); }
+      else { await disablePushAlerts(); setCalls(false); }
+    } catch (error) { setNotice(error.message || "Call alerts could not be changed."); }
+  };
+
+  return (
+    <SettingsGroup
+      title="Notifications"
+      footnote="Off by default. Covers new messages, friend requests, accepted requests, and incoming calls. Notifications never include message text. Turning on the last switch also lets calls and messages reach you while Timber is closed, which means the push service is told that a message arrived and who from — never what it said. Per-chat mutes apply while Timber is open; they cannot be honoured while it is closed."
+    >
+      <SettingsRow
+        icon={Icons.bell}
+        tint="amber"
+        title="Private notifications"
+        subtitle={settings.enabled ? "On for this device" : "Off"}
+        control={<SettingsSwitch checked={settings.enabled} onChange={toggleMaster} label="Private notifications" />}
+      />
+      {settings.enabled && (
+        <>
+          <SettingsRow
+            icon={Icons.moon}
+            tint="wood"
+            title="Quiet digest"
+            subtitle={digestCount > 0 ? `${digestCount} waiting` : "Collect messages instead of alerting"}
+            control={<SettingsSwitch checked={settings.digest} onChange={(value) => patch({ digest: value })} label="Quiet digest" />}
+          />
+          <SettingsRow
+            icon={Icons.clock}
+            tint="wood"
+            title="Check-in reminders"
+            subtitle="A generic nudge while Timber is open"
+            control={<SettingsSwitch checked={settings.checkIns} onChange={(value) => patch({ checkIns: value })} label="Check-in reminders" />}
+          />
+        </>
+      )}
+      <SettingsRow
+        icon={Icons.phone}
+        tint="green"
+        title="Alerts when Timber is closed"
+        subtitle={pushSupported() ? "Calls and messages reach you with the app shut" : "Not supported by this browser"}
+        control={<SettingsSwitch checked={calls} onChange={toggleCalls} label="Alerts when Timber is closed" disabled={!pushSupported()} />}
+      />
+      {digestCount > 0 && (
+        <SettingsRow
+          icon={Icons.moon}
+          tint="wood"
+          title="Clear quiet digest"
+          value={digestCount}
+          action
+          onClick={async () => { await clearDigest(); setDigestCount(0); }}
+        />
+      )}
+      {notice && <p className="settings-notice">{notice}</p>}
+    </SettingsGroup>
   );
 }
 
 /**
  * The version this device is running, and the one the relay is running.
  *
- * Worth a row of its own: the first useful question about any bug report is
- * which build the person is on, and an installed PWA can sit on a cached shell
- * for a while after a release.
+ * The first useful question about any bug report is which build the person is
+ * on, and an installed PWA can sit on a cached shell for a while after a
+ * release, so the two are shown separately.
  */
-function BuildInfo() {
+function BuildGroup() {
   const [server, setServer] = useState(null);
   useEffect(() => {
     let live = true;
@@ -168,107 +345,10 @@ function BuildInfo() {
   }, []);
 
   return (
-    <>
-      <div className="settings-row">
-        <div>
-          <span className="settings-row-title">App</span>
-          <span className="settings-row-note">This device</span>
-        </div>
-        <span className="settings-row-state">{__APP_VERSION__}</span>
-      </div>
-      <div className="settings-row">
-        <div>
-          <span className="settings-row-title">Relay</span>
-          <span className="settings-row-note">Timber service</span>
-        </div>
-        <span className="settings-row-state">{server ?? "…"}</span>
-      </div>
-      <p className="panel-note">
-        Quote the app version if you ever report a problem. It never identifies you.
-      </p>
-    </>
-  );
-}
-
-function CallAlertControls() {
-  const [enabled, setEnabled] = useState(false);
-  const [notice, setNotice] = useState("");
-  useEffect(() => {
-    callAlertsEnabled().then(setEnabled).catch(() => setEnabled(false));
-  }, []);
-  return <section className="panel">
-    <h3 className="section-title">Incoming call alerts</h3>
-    <p className="panel-note">Optional. When Timber is installed but closed, a browser notification can say who is calling. It never includes chat text.</p>
-    {!pushSupported() ? <p className="panel-note">This browser does not support background call alerts.</p> : !enabled ? <button className="btn-ghost btn-block" onClick={async () => {
-      try { await enableCallAlerts(); setEnabled(true); setNotice("Incoming call alerts are on for this device."); }
-      catch (error) { setNotice(error.message || "Call alerts could not be enabled."); }
-    }}>Enable incoming call alerts</button> : <button className="btn-ghost btn-block" onClick={async () => {
-      await disableCallAlerts(); setEnabled(false); setNotice("Incoming call alerts are off for this device.");
-    }}>Turn off incoming call alerts</button>}
-    {notice && <p className="field-ok">{notice}</p>}
-  </section>;
-}
-
-function DeviceContinuity() {
-  const [transfer, setTransfer] = useState("");
-  const [notice, setNotice] = useState("");
-  return (
-    <section className="panel">
-      <h3 className="section-title">Restore & device continuity</h3>
-      <p className="panel-note">{navigator.onLine ? "Sync is available: " : "You are offline: "} Timber restores encrypted ciphertext after you sign in on another device. The server cannot open it.</p>
-      {!transfer ? <button className="btn-ghost btn-block" onClick={async () => {
-        try { setTransfer(await exportVaultTransfer()); }
-        catch { setNotice("Could not prepare the encrypted transfer code. Try again while Timber is unlocked."); }
-      }}>Show encrypted transfer QR</button> : <>
-        <div className="safety-qr" aria-label="Encrypted device transfer QR code"><QRCodeSVG value={transfer} size={176} includeMargin /></div>
-        <p className="onboard-warning">This QR is an encrypted copy of your device vault, not your recovery phrase. Treat it like a password export: show it only to your new device, which must also enter this device’s current PIN.</p>
-        <button className="btn-ghost btn-block" onClick={async () => {
-          try { await navigator.clipboard.writeText(transfer); setNotice("Encrypted transfer code copied."); }
-          catch { setNotice("Copy is unavailable in this browser; scan the QR on your new device."); }
-        }}>Copy encrypted transfer code</button>
-        <button className="btn-ghost btn-block" onClick={() => setTransfer("")}>Hide transfer code</button>
-      </>}
-      {notice && <p className="field-ok">{notice}</p>}
-    </section>
-  );
-}
-
-function NotificationControls() {
-  const [settings, setSettings] = useState({ enabled: false, digest: false, checkIns: false });
-  const [digestCount, setDigestCount] = useState(0);
-  const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      try {
-        setSettings(await notificationSettings());
-        setDigestCount(await pendingDigestCount());
-      } catch { /* preferences are optional */ }
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const patch = async (next) => {
-    const saved = await updateNotificationSettings(next);
-    setSettings(saved);
-  };
-
-  return (
-    <section className="panel">
-      <h3 className="section-title">Calm notifications</h3>
-      <p className="panel-note">Off by default. Notifications never include message text; each chat can also be muted from its header.</p>
-      {!settings.enabled ? (
-        <button className="btn-ghost btn-block" onClick={async () => {
-          try { setSettings(await requestNotificationPermission()); setNotice("Private notifications are on."); }
-          catch { setNotice("Notifications are unavailable or were not allowed by this browser."); }
-        }}>Enable private notifications</button>
-      ) : <>
-        <label className="explore-check"><input type="checkbox" checked={settings.digest} onChange={(event) => patch({ digest: event.target.checked })} /> <span>Collect messages in a quiet digest instead of alerting immediately</span></label>
-        <label className="explore-check"><input type="checkbox" checked={settings.checkIns} onChange={(event) => patch({ checkIns: event.target.checked })} /> <span>Optional generic check-in reminder while Timber is open</span></label>
-        {digestCount > 0 && <button className="btn-ghost btn-block" onClick={async () => { await clearDigest(); setDigestCount(0); }}>Clear quiet digest ({digestCount})</button>}
-      </>}
-      {notice && <p className="field-ok">{notice}</p>}
-    </section>
+    <SettingsGroup title="About" footnote="Quote the app version if you ever report a problem. It never identifies you.">
+      <SettingsRow icon={Icons.info} tint="wood" title="App" subtitle="This device" value={__APP_VERSION__} />
+      <SettingsRow icon={Icons.info} tint="wood" title="Relay" subtitle="Timber service" value={server ?? "…"} />
+    </SettingsGroup>
   );
 }
 
@@ -281,16 +361,6 @@ function Stat({ label, value }) {
   );
 }
 
-function Modal({ title, children, onClose }) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal glass-panel" onClick={(event) => event.stopPropagation()}>
-        <h3 className="modal-title">{title}</h3>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 /** Re-asks for the PIN: the phrase is the account, so showing it needs proof. */
 function RevealPhrase({ onClose }) {

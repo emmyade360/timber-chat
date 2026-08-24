@@ -45,8 +45,38 @@ prompted secret environment values:
 | `WEBRTC_STUN_URLS` | Your comma-separated STUN URLs |
 | `WEBRTC_TURN_URLS` | Your UDP and TLS/TCP TURN URLs |
 | `WEBRTC_TURN_SHARED_SECRET` | Coturn `static-auth-secret` |
-| `WEB_PUSH_VAPID_PRIVATE_KEY` | URL-safe, unpadded private VAPID key (optional call alerts) |
-| `WEB_PUSH_VAPID_SUBJECT` | `mailto:` or HTTPS contact URI for VAPID (optional call alerts) |
+| `WEB_PUSH_VAPID_PRIVATE_KEY` | URL-safe, unpadded private VAPID key — **required for background alerts** |
+| `WEB_PUSH_VAPID_SUBJECT` | `mailto:` or HTTPS contact URI for VAPID |
+
+### Background alerts (Web Push)
+
+Without both VAPID variables the relay silently sends no pushes, and a user whose
+app is closed learns nothing until they next open it. The private key must match
+`VITE_WEB_PUSH_PUBLIC_KEY` in the Vercel build — a mismatch fails per delivery,
+not at startup, so it is easy to miss.
+
+The pair for this deployment is already generated: the public half is committed
+in [frontend/.env.production](./frontend/.env.production), and the private half
+is in the gitignored `backend/.env`. **Copy the private key from there into
+Render's dashboard**; it is deliberately not in the repository.
+
+To generate a fresh pair:
+
+```sh
+python3 - <<'EOF'
+import base64
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+key = ec.generate_private_key(ec.SECP256R1())
+print("private:", b64(key.private_numbers().private_value.to_bytes(32, "big")))
+print("public: ", b64(key.public_key().public_bytes(
+    serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)))
+EOF
+```
+
+Rotating the pair invalidates every existing subscription: each device
+re-registers the next time it launches, so alerts pause until then.
 
 Leave `DATABASE_MAX_CONNECTIONS=5` unless the pooler's budget requires a lower
 number. Render supplies `PORT`; Timber binds to it on `0.0.0.0` automatically.

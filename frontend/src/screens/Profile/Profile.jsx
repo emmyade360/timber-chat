@@ -3,8 +3,10 @@
 
 import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
-import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import GrowthBar from "../../components/Level/GrowthBar.jsx";
 import { updateCurrentUser, userMessage } from "../../lib/api.js";
+import { SettingsGroup, SettingsRow } from "../../components/Settings/SettingsList.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 
 function ProfileAvatar({ username, url, size = "large" }) {
   if (url) return <AvatarImage key={url} username={username} url={url} size={size} />;
@@ -30,7 +32,9 @@ export default function Profile({ onOpenSettings }) {
     <div className="screen profile-screen">
       <header className="screen-header">
         <h1 className="screen-title">Profile</h1>
-        <button className="screen-header-action" onClick={onOpenSettings} aria-label="Open settings">⚙</button>
+        <button className="screen-header-action" onClick={onOpenSettings} aria-label="Open settings" title="Settings">
+          {Icons.settings}
+        </button>
       </header>
 
       <section className="profile-view-hero">
@@ -42,26 +46,31 @@ export default function Profile({ onOpenSettings }) {
         <button className="btn-wood profile-edit-button" onClick={() => setEditing(true)}>Edit profile</button>
       </section>
 
-      <section className="panel">
-        <h2 className="section-title">Your Timber identity</h2>
-        <div className="settings-row">
-          <div><span className="settings-row-title">Username</span><span className="settings-row-note">@{me.username}</span></div>
-          <span className="settings-row-state">Permanent</span>
+      <SettingsGroup
+        title="Identity"
+        footnote="Your username is permanent because it is bound to your non-custodial account identity. Timber never asks for an email or password."
+      >
+        <SettingsRow icon={Icons.profile} tint="wood" title="Username" subtitle={`@${me.username}`} value="Permanent" />
+      </SettingsGroup>
+
+      <SettingsGroup title="Growth" footnote="Growth reflects steady, consent-based connection — never message volume, time online, or popularity.">
+        <div className="settings-item settings-item--plain">
+          <GrowthBar me={me} badgeSize={34} />
         </div>
-        <p className="panel-note">Your username is permanent because it is bound to your non-custodial account identity. Timber never asks for an email or password.</p>
-      </section>
+      </SettingsGroup>
 
-      <section className="panel profile-growth-summary">
-        <LevelBadge level={me.level} size={52} />
-        <div><h2 className="section-title">Current growth</h2><p className="panel-note">Stage {me.level} · {me.level_name}</p></div>
-        <span className="profile-growth-points">{me.growth_points.toLocaleString()}</span>
-      </section>
-
-      <section className="panel">
-        <h2 className="section-title">Profile privacy</h2>
-        <p className="panel-note">Your photo is standard account metadata, not encrypted chat content. It is optional. Explore uses a separate, opt-in public card with its own photo and bio.</p>
-        <button className="btn-ghost btn-block" onClick={onOpenSettings}>Open privacy & settings</button>
-      </section>
+      <SettingsGroup
+        title="Privacy"
+        footnote="Your photo is standard account metadata, not encrypted chat content. It is optional. Explore uses a separate, opt-in public card with its own photo and bio."
+      >
+        <SettingsRow
+          icon={Icons.lock}
+          tint="amber"
+          title="Privacy & settings"
+          subtitle="Notifications, security, and this device"
+          onClick={onOpenSettings}
+        />
+      </SettingsGroup>
     </div>
   );
 }
@@ -89,7 +98,7 @@ function ProfileEditor({ me, onBack }) {
   return (
     <div className="screen profile-screen">
       <header className="screen-header">
-        <button className="screen-header-action" onClick={onBack} aria-label="Back to profile">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">{Icons.back}</button>
         <h1 className="screen-title">Edit profile</h1>
       </header>
 

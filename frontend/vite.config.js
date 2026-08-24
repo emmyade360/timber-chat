@@ -17,7 +17,10 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.js',
-      registerType: 'prompt',
+      // autoUpdate, paired with skipWaiting/clientsClaim in sw.js: a fix to the
+      // push handler has to reach an installed app on the next load, not
+      // whenever the user happens to close every tab.
+      registerType: 'autoUpdate',
       includeAssets: ['timber.svg'],
       manifest: {
         id: '/',
@@ -27,15 +30,15 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#2c1a0e',
-        theme_color: '#5c3317',
+        background_color: '#313338',
+        theme_color: '#1E1F22',
         icons: [
           { src: '/icons/timber-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
           { src: '/icons/timber-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png}'],
       },
     }),
   ],

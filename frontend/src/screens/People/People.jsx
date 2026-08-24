@@ -1,9 +1,16 @@
-// Friends, requests, and search.
+// People: who you are actually talking to, with requests and the full friend
+// list one tap away.
 //
-// Search results carry the state of the relationship so the button always says the
-// truthful next action -- including the one-more-try warning after a rejection.
+// The default view is deliberately the narrow one. Most of the time the answer
+// to "who am I here for" is someone you already have a conversation with, so
+// that is what the screen opens on; the friend list and the request queue are
+// browsing surfaces, and they live behind their own icons rather than pushing
+// the live conversations down the page.
+//
+// Search cuts across all three: a term always shows results, whichever view is
+// selected, because looking someone up is not a fourth mode.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   getFriends,
@@ -16,13 +23,19 @@ import {
 import { useChatStore } from "../../store/chatStore.js";
 import { reconcileRealtime } from "../../lib/sync.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import { timeAgo } from "../../lib/time.js";
 
 function normalizedSearchTerm(value) {
   return value.trim().replace(/^@+/, "");
 }
 
+/** The three things this screen can be showing, aside from search results. */
+const VIEWS = { active: "active", requests: "requests", friends: "friends" };
+
 export default function People({ onOpenConversation }) {
-  const { friends, pendingReceived, pendingSent, setFriends, onlineUsers, me } = useChatStore();
+  const { friends, pendingReceived, pendingSent, setFriends, onlineUsers, me, conversations, unread } =
+    useChatStore();
+  const [view, setView] = useState(VIEWS.active);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searchState, setSearchState] = useState("idle");
@@ -31,6 +44,21 @@ export default function People({ onOpenConversation }) {
   const term = normalizedSearchTerm(query);
   const hasSearchTerm = term.length >= 2;
   const visibleResults = hasSearchTerm ? results : [];
+
+  /**
+   * Friends with a conversation that has actually started, newest first.
+   *
+   * A conversation row exists from the moment a request is accepted, so the
+   * test for "ongoing" is whether anything has been said in it. Joining onto
+   * the friend record is what supplies the growth stage the row displays.
+   */
+  const ongoing = useMemo(() => {
+    const byPeer = new Map(conversations.map((entry) => [entry.peerId, entry]));
+    return friends
+      .map((friend) => ({ friend, conversation: byPeer.get(friend.id) }))
+      .filter((entry) => entry.conversation?.preview)
+      .sort((a, b) => (b.conversation.updatedAt ?? 0) - (a.conversation.updatedAt ?? 0));
+  }, [conversations, friends]);
 
   const refresh = async () => {
     const { data } = await getFriends();
@@ -96,6 +124,10 @@ export default function People({ onOpenConversation }) {
       "Friend request sent. You can chat once they accept.",
     );
 
+  // Tapping the active icon returns to the conversations the screen opens on,
+  // so neither icon is a one-way door.
+  const toggleView = (next) => setView((current) => (current === next ? VIEWS.active : next));
+
   const changeQuery = (value) => {
     setQuery(value);
     setResults([]);
@@ -107,6 +139,24 @@ export default function People({ onOpenConversation }) {
       <div className="screen-toolbar">
         <header className="screen-header">
           <h1 className="screen-title">People</h1>
+          <div className="people-views" role="group" aria-label="People views">
+            <ViewIcon
+              active={view === VIEWS.requests}
+              badge={pendingReceived.length}
+              label="Friend requests"
+              onClick={() => toggleView(VIEWS.requests)}
+            >
+              <RequestIcon />
+            </ViewIcon>
+            <ViewIcon
+              active={view === VIEWS.friends}
+              badge={0}
+              label="Friend list"
+              onClick={() => toggleView(VIEWS.friends)}
+            >
+              <FriendsIcon />
+            </ViewIcon>
+          </div>
         </header>
         <div className="search-wrap">
           <input
@@ -151,79 +201,117 @@ export default function People({ onOpenConversation }) {
         </Section>
       )}
 
-      {pendingReceived.length > 0 && (
-        <Section title={`Requests (${pendingReceived.length})`}>
-          {pendingReceived.map((request) => (
-            <Row key={request.id} user={request} online={onlineUsers.has(request.user_id)}>
-              <div className="row-actions">
-                <button
-                  className="btn-wood btn-sm"
-                  disabled={busyId === request.id}
-                  onClick={() => accept(request)}
-                >
-                  Accept
-                </button>
-                <button
-                  className="btn-ghost btn-sm"
-                  disabled={busyId === request.id}
-                  onClick={() => act(request.id, () => respondToFriendRequest(request.id, false))}
-                >
-                  Decline
-                </button>
-              </div>
-            </Row>
-          ))}
+      {!hasSearchTerm && view === VIEWS.active && (
+        <Section title={`Conversations (${ongoing.length})`}>
+          {ongoing.length === 0 ? (
+            <p className="section-empty">
+              No conversations yet. Open your friend list to start one, or search for a
+              username above to add someone.
+            </p>
+          ) : (
+            ongoing.map(({ friend, conversation }) => (
+              <Row
+                key={conversation.id}
+                user={friend}
+                online={onlineUsers.has(friend.id)}
+                onOpen={() => onOpenConversation(friend.id, conversation.id)}
+              >
+                <span className="row-when">
+                  {unread[conversation.id] > 0 && (
+                    <span className="unread-badge">{unread[conversation.id] > 9 ? "9+" : unread[conversation.id]}</span>
+                  )}
+                  {conversation.updatedAt ? timeAgo(conversation.updatedAt) : ""}
+                </span>
+              </Row>
+            ))
+          )}
         </Section>
       )}
 
-      {pendingSent.length > 0 && (
-        <Section title="Sent">
-          {pendingSent.map((request) => (
-            <Row key={request.id} user={request} online={false}>
-              <span className="row-note">Pending</span>
-            </Row>
-          ))}
-        </Section>
+      {!hasSearchTerm && view === VIEWS.requests && (
+        <>
+          <Section title={`Requests (${pendingReceived.length})`}>
+            {pendingReceived.length === 0 ? (
+              <p className="section-empty">No one is waiting on an answer from you.</p>
+            ) : (
+              pendingReceived.map((request) => (
+                <Row key={request.id} user={request} online={onlineUsers.has(request.user_id)}>
+                  <div className="row-actions">
+                    <button
+                      className="btn-wood btn-sm"
+                      disabled={busyId === request.id}
+                      onClick={() => accept(request)}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      className="btn-ghost btn-sm"
+                      disabled={busyId === request.id}
+                      onClick={() => act(request.id, () => respondToFriendRequest(request.id, false))}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </Row>
+              ))
+            )}
+          </Section>
+
+          {pendingSent.length > 0 && (
+            <Section title={`Sent (${pendingSent.length})`}>
+              {pendingSent.map((request) => (
+                <Row key={request.id} user={request} online={false}>
+                  <span className="row-note">Pending</span>
+                </Row>
+              ))}
+            </Section>
+          )}
+        </>
       )}
 
-      <Section title={`Friends (${friends.length})`}>
-        {friends.length === 0 ? (
-          <p className="section-empty">
-            No friends yet. Search for a username above to send your first request.
-          </p>
-        ) : (
-          friends.map((friend) => (
-            <Row key={friend.id} user={friend} online={onlineUsers.has(friend.id)}>
-              <div className="row-actions">
-                <button
-                  className="btn-wood btn-sm"
-                  onClick={() => onOpenConversation(friend.id, friend.conversation_id)}
-                >
-                  Message
-                </button>
-                <button
-                  className="btn-ghost btn-sm"
-                  disabled={busyId === friend.id}
-                  onClick={() => {
-                    if (window.confirm(`Remove @${friend.username}? This deletes your conversation.`)) {
-                      act(friend.id, async () => {
-                        await removeFriend(friend.id);
-                        // The server only needs to notify the other account;
-                        // reconcile this tab immediately as well.
-                        await reconcileRealtime();
-                      });
-                    }
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            </Row>
-          ))
-        )}
-      </Section>
+      {!hasSearchTerm && view === VIEWS.friends && (
+        <>
+          <Section title={`Friends (${friends.length})`}>
+            {friends.length === 0 ? (
+              <p className="section-empty">
+                No friends yet. Search for a username above to send your first request.
+              </p>
+            ) : (
+              friends.map((friend) => (
+                <Row key={friend.id} user={friend} online={onlineUsers.has(friend.id)}>
+                  <div className="row-actions">
+                    <button
+                      className="btn-wood btn-sm"
+                      onClick={() => onOpenConversation(friend.id, friend.conversation_id)}
+                    >
+                      Message
+                    </button>
+                    <button
+                      className="btn-ghost btn-sm"
+                      disabled={busyId === friend.id}
+                      onClick={() => {
+                        if (window.confirm(`Remove @${friend.username}? This deletes your conversation.`)) {
+                          act(friend.id, async () => {
+                            await removeFriend(friend.id);
+                            // The server only needs to notify the other account;
+                            // reconcile this tab immediately as well.
+                            await reconcileRealtime();
+                          });
+                        }
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </Row>
+              ))
+            )}
+          </Section>
 
-      {me && <ContactExchange onAdd={async (id) => { await sendFriendRequest(id); await refresh(); }} />}
+          {/* Adding someone belongs with the list of who you have already added. */}
+          {me && <ContactExchange onAdd={async (id) => { await sendFriendRequest(id); await refresh(); }} />}
+        </>
+      )}
     </div>
   );
 }
@@ -271,6 +359,52 @@ function SearchAction({ user, busy, onAdd, onOpen }) {
   );
 }
 
+/**
+ * One of the two view switches in the header.
+ *
+ * These are toggles rather than links, so `aria-pressed` is what tells a screen
+ * reader which surface is showing; the badge count is folded into the label for
+ * the same reason.
+ */
+function ViewIcon({ active, badge, label, onClick, children }) {
+  return (
+    <button
+      type="button"
+      className={`people-view ${active ? "people-view--active" : ""}`}
+      aria-pressed={active}
+      aria-label={badge > 0 ? `${label}, ${badge} waiting` : label}
+      title={label}
+      onClick={onClick}
+    >
+      {children}
+      {badge > 0 && <span className="people-view-badge">{badge > 9 ? "9+" : badge}</span>}
+    </button>
+  );
+}
+
+/** A person with a plus: the request queue. */
+function RequestIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9.5" cy="8" r="3.6" />
+      <path d="M3.4 20c0-3.3 2.7-5.6 6.1-5.6 1.2 0 2.3.3 3.2.8" />
+      <path d="M17.5 14.6v5.2M14.9 17.2h5.2" />
+    </svg>
+  );
+}
+
+/** Two people: the full friend list. */
+function FriendsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3.4" />
+      <path d="M2.9 19.8c0-3.2 2.7-5.4 6.1-5.4s6.1 2.2 6.1 5.4" />
+      <path d="M16.2 5.1a3.4 3.4 0 0 1 0 6.5" />
+      <path d="M17.6 14.7c2.2.5 3.7 2.2 3.7 4.5" />
+    </svg>
+  );
+}
+
 function Section({ title, children }) {
   return (
     <section className="people-section">
@@ -285,20 +419,28 @@ function Section({ title, children }) {
  * right, and an optional note on its own line so a long warning never squeezes
  * the button into an unreadable column.
  */
-function Row({ user, online, children, footnote }) {
+function Row({ user, online, children, footnote, onOpen }) {
   const name = user.username;
+  // A conversation row is the whole target; a browsing row is not clickable and
+  // keeps its buttons as the only actions.
+  const Identity = onOpen ? "button" : "span";
   return (
     <div className="people-row">
-      <span className={`avatar avatar--sm ${online ? "avatar--online" : ""}`}>
-        {name?.[0]?.toUpperCase() ?? "?"}
-      </span>
-      <span className="people-row-text">
-        <span className="people-row-name">@{name}</span>
-        <span className="people-row-level">
-          <LevelBadge level={user.level} size={13} />
-          <span>{user.level_name}</span>
+      <Identity
+        className={`people-row-identity ${onOpen ? "people-row-identity--open" : ""}`}
+        {...(onOpen ? { type: "button", onClick: onOpen, "aria-label": `Open your chat with @${name}` } : {})}
+      >
+        <span className={`avatar avatar--sm ${online ? "avatar--online" : ""}`}>
+          {name?.[0]?.toUpperCase() ?? "?"}
         </span>
-      </span>
+        <span className="people-row-text">
+          <span className="people-row-name">@{name}</span>
+          <span className="people-row-level">
+            <LevelBadge level={user.level} size={13} name={user.level_name} />
+            <span>{user.level_name}</span>
+          </span>
+        </span>
+      </Identity>
       {children}
       {footnote && <p className="row-footnote">{footnote}</p>}
     </div>

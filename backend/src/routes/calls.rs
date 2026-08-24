@@ -16,7 +16,12 @@ use web_push::{ContentEncoding, IsahcWebPushClient, SubscriptionInfo, Urgency, V
 
 use crate::{AppState, auth::AuthUser, error::ApiError};
 
-pub const CALL_TTL_SECONDS: i64 = 60;
+/// How long an unanswered call stays pickup-able.
+///
+/// Generous on purpose: a push wakes a device whose vault is locked, and the
+/// recipient has to unlock it before the call can be answered. At 60s the call
+/// routinely expired during the PIN derivation and the walk to the phone.
+pub const CALL_TTL_SECONDS: i64 = 150;
 
 #[derive(Clone)]
 pub struct SealedCallSignal {
@@ -231,7 +236,67 @@ fn vapid_configuration() -> Option<(String, String)> {
 
 /// Send a lock-screen-safe incoming-call alert. A `true` result means a push
 /// service accepted at least one notification; it does not reveal delivery data.
+/// A call is the urgent case: high urgency, and a topic keyed to the call so a
+/// second alert for the same call replaces the first rather than stacking.
 pub async fn send_call_push(state: &AppState, recipient: Uuid, call_id: Uuid, username: &str, media: &str) -> bool {
+    let payload = serde_json::json!({
+        "type": "incoming-call", "callId": call_id, "username": username, "media": media,
+    });
+    send_push(state, recipient, &payload, CALL_TTL_SECONDS as u32, Urgency::High, Some(call_id.simple().to_string())).await
+}
+
+/// A friend request, or the acceptance of one.
+///
+/// Normal urgency and a day of TTL: unlike a call there is nothing to miss by
+/// arriving late, and it should still be waiting when the device wakes up. The
+/// payload carries a username and nothing else -- the same shape as the call
+/// push, and never anything from a conversation.
+pub async fn send_friend_push(state: &AppState, recipient: Uuid, kind: &str, username: &str) -> bool {
+    let payload = serde_json::json!({ "type": kind, "username": username });
+    send_push(state, recipient, &payload, 60 * 60 * 24, Urgency::Normal, None).await
+}
+
+/// A message arrived for someone with no live socket.
+///
+/// The payload is a conversation id and a username. It deliberately carries no
+/// message content, no preview and no count -- the relay could not read the
+/// ciphertext even if it wanted to, and the push provider learns only that a
+/// message arrived. `topic` is the conversation, so ten messages in one thread
+/// replace each other rather than stacking ten notifications.
+pub async fn send_message_push(
+    state: &AppState,
+    recipient: Uuid,
+    conversation_id: Uuid,
+    username: &str,
+) -> bool {
+    let payload = serde_json::json!({
+        "type": "message",
+        "conversationId": conversation_id,
+        "username": username,
+    });
+    send_push(
+        state,
+        recipient,
+        &payload,
+        60 * 60 * 12,
+        Urgency::Normal,
+        Some(format!("m{}", conversation_id.simple())),
+    )
+    .await
+}
+
+/// Fan a payload out to every device this account has registered.
+///
+/// Endpoints that the provider reports as dead are deleted as we go, so a
+/// stale subscription cannot accumulate forever.
+async fn send_push(
+    state: &AppState,
+    recipient: Uuid,
+    payload: &serde_json::Value,
+    ttl_seconds: u32,
+    urgency: Urgency,
+    topic: Option<String>,
+) -> bool {
     let Some((private_key, subject)) = vapid_configuration() else { return false; };
     let subscriptions = match sqlx::query_as::<_, PushSubscriptionRow>("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1")
         .bind(recipient).fetch_all(&state.db).await {
@@ -239,15 +304,17 @@ pub async fn send_call_push(state: &AppState, recipient: Uuid, call_id: Uuid, us
         Err(error) => { warn!(%error, "Could not load push subscriptions"); return false; }
     };
     let client = match IsahcWebPushClient::new() { Ok(client) => client, Err(_) => return false };
-    let payload = serde_json::json!({ "type": "incoming-call", "callId": call_id, "username": username, "media": media }).to_string();
+    let payload = payload.to_string();
     let mut delivered = false;
     for subscription in subscriptions {
         let info = SubscriptionInfo::new(subscription.endpoint.clone(), subscription.p256dh, subscription.auth);
         let mut builder = WebPushMessageBuilder::new(&info);
         builder.set_payload(ContentEncoding::Aes128Gcm, payload.as_bytes());
-        builder.set_ttl(CALL_TTL_SECONDS as u32);
-        builder.set_urgency(Urgency::High);
-        builder.set_topic(call_id.simple().to_string());
+        builder.set_ttl(ttl_seconds);
+        builder.set_urgency(urgency);
+        if let Some(topic) = topic.clone() {
+            builder.set_topic(topic);
+        }
         let signature = match VapidSignatureBuilder::from_base64(&private_key, &info) {
             Ok(mut signature) => { signature.add_claim("sub", subject.as_str()); match signature.build() { Ok(value) => value, Err(_) => continue } }
             Err(_) => continue,
@@ -262,7 +329,7 @@ pub async fn send_call_push(state: &AppState, recipient: Uuid, call_id: Uuid, us
             Err(WebPushError::EndpointNotValid(_) | WebPushError::EndpointNotFound(_)) => {
                 let _ = sqlx::query("DELETE FROM push_subscriptions WHERE endpoint = $1").bind(subscription.endpoint).execute(&state.db).await;
             }
-            Err(error) => warn!(kind = error.short_description(), "Incoming call push was not accepted"),
+            Err(error) => warn!(kind = error.short_description(), "Push was not accepted"),
         }
     }
     delivered

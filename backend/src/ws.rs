@@ -44,6 +44,7 @@ const MAX_WS_FRAME_BYTES: usize = 32 * 1024;
 /// One page of history is 50 messages; this leaves room for a device that has
 /// been offline a while without letting a client send an unbounded array.
 const MAX_DELIVERY_RECEIPT_BATCH: usize = 500;
+const MAX_READ_RECEIPT_BATCH: usize = 500;
 
 /// Who should receive an event.
 ///
@@ -141,10 +142,25 @@ struct TypingInput {
     conversation_id: Uuid,
 }
 
+/// Batched, with the old single-id shape still accepted: this is a PWA and
+/// cached shells keep sending the previous form for a while after a release.
 #[derive(Deserialize)]
 struct ReadReceiptInput {
     conversation_id: Uuid,
-    message_id: Uuid,
+    #[serde(default)]
+    message_ids: Vec<Uuid>,
+    #[serde(default)]
+    message_id: Option<Uuid>,
+}
+
+impl ReadReceiptInput {
+    fn ids(&self) -> Vec<Uuid> {
+        if self.message_ids.is_empty() {
+            self.message_id.into_iter().collect()
+        } else {
+            self.message_ids.clone()
+        }
+    }
 }
 
 /// Delivery is acknowledged in batches: a device that has been offline can come
@@ -259,11 +275,22 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: AuthUser) {
             incoming = socket_rx.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        if process_socket_event(&state, &user, text.as_str()).await.is_err() {
+                        if let Err(error) = process_socket_event(&state, &user, text.as_str()).await {
                             // Event payloads are client-controlled. Keep the
                             // audit signal without copying parser details or
                             // attacker-crafted values into production logs.
                             warn!(user_id = %user.id, "Rejected WebSocket event");
+                            // Tell the client something was refused. It carries
+                            // no detail, but silence here is what made a whole
+                            // class of dropped-receipt bugs invisible.
+                            let scope = match error {
+                                ApiError::TooManyRequests(_) => "rate-limited",
+                                _ => "rejected",
+                            };
+                            let frame = json!({ "type": "error", "payload": { "scope": scope } });
+                            if socket_tx.send(Message::Text(frame.to_string().into())).await.is_err() {
+                                break;
+                            }
                         }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
@@ -430,29 +457,26 @@ async fn process_socket_event(
         }
         "receipt.read" => {
             let input: ReadReceiptInput = deserialize_payload(event.payload)?;
+            let ids = input.ids();
+            if ids.is_empty() {
+                return Ok(());
+            }
+            if ids.len() > MAX_READ_RECEIPT_BATCH {
+                return Err(ApiError::BadRequest(
+                    "Too many read receipts in one batch.".into(),
+                ));
+            }
             let peer = require_participant(&state.db, input.conversation_id, user.id).await?;
-            let inserted = sqlx::query(
-                r#"
-                INSERT INTO read_receipts (message_id, user_id)
-                SELECT $1, $2
-                WHERE EXISTS (SELECT 1 FROM messages WHERE id = $1 AND conversation_id = $3)
-                ON CONFLICT DO NOTHING
-                "#,
-            )
-            .bind(input.message_id)
-            .bind(user.id)
-            .bind(input.conversation_id)
-            .execute(&state.db)
-            .await?;
+            let read = record_read_receipts(&state.db, input.conversation_id, user.id, &ids).await?;
 
-            if inserted.rows_affected() > 0 {
+            if !read.is_empty() {
                 publish(
                     state,
                     EventTarget::User(peer),
                     "receipt.read",
                     json!({
                         "conversation_id": input.conversation_id,
-                        "message_id": input.message_id,
+                        "message_ids": read,
                         "user_id": user.id,
                     }),
                 );
@@ -461,6 +485,56 @@ async fn process_socket_event(
         }
         _ => unreachable!("event type was validated before dispatch"),
     }
+}
+
+/// Push to a recipient who has no socket open right now.
+///
+/// Spawned rather than awaited: `send_push` makes an HTTPS round trip per
+/// registered device, and a recipient with three stale subscriptions would
+/// otherwise add three timeouts to the sender's `message.send`.
+async fn notify_offline_recipient(
+    state: &AppState,
+    peer: Uuid,
+    conversation_id: Uuid,
+    username: &str,
+) {
+    if state.online_users.lock().await.contains_key(&peer) {
+        return;
+    }
+    let state = state.clone();
+    let username = username.to_owned();
+    tokio::spawn(async move {
+        crate::routes::calls::send_message_push(&state, peer, conversation_id, &username).await;
+    });
+}
+
+/// Record read receipts and report which ones were new.
+///
+/// `m.sender_id <> $2` is an authorization check, not an optimisation: without
+/// it an account could mark its own messages read and publish a receipt to the
+/// peer for something they never sent.
+pub async fn record_read_receipts(
+    db: &sqlx::PgPool,
+    conversation_id: Uuid,
+    user_id: Uuid,
+    ids: &[Uuid],
+) -> Result<Vec<Uuid>, ApiError> {
+    let read: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        INSERT INTO read_receipts (message_id, user_id)
+        SELECT m.id, $2
+        FROM messages m
+        WHERE m.id = ANY($1) AND m.conversation_id = $3 AND m.sender_id <> $2
+        ON CONFLICT DO NOTHING
+        RETURNING message_id
+        "#,
+    )
+    .bind(ids)
+    .bind(user_id)
+    .bind(conversation_id)
+    .fetch_all(db)
+    .await?;
+    Ok(read)
 }
 
 /// Call signalling is never persisted. These checks make the WebSocket a
@@ -691,6 +765,11 @@ async fn send_message(
         "message.new",
         payload,
     );
+
+    // The publish above only reaches a live socket. If the recipient has none,
+    // a push is the only thing that will tell them anything arrived before they
+    // next open the app.
+    notify_offline_recipient(state, peer, input.conversation_id, &user.username).await;
 
     // The first intentional conversation activity of a day can advance connection
     // growth. Message quantity and time online never affect it.

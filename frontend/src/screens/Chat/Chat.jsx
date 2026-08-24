@@ -20,6 +20,8 @@ import { downloadEncrypted, uploadEncrypted, userMessage } from "../../lib/api.j
 import { loadConversation, loadOlder, prepareOutgoingPayload } from "../../lib/sync.js";
 import { notificationSettings, setChatNotification } from "../../lib/notifications.js";
 import { timeAgo } from "../../lib/time.js";
+import { Icons } from "../../components/Settings/icons.jsx";
+import Modal from "../../components/Modal.jsx";
 
 const TYPING_IDLE_MS = 1500;
 const VOICE_NOTE_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -68,7 +70,7 @@ function labelForPayload(payload) {
   return payload?.body ?? "";
 }
 
-export default function Chat({ conversationId, send, onBack, onStartCall, call }) {
+export default function Chat({ conversationId, send, onBack, onStartCall, call, onAcknowledge }) {
   const { messages, conversations, typing, onlineUsers } = useChatStore();
   const [text, setText] = useState("");
   const [sendError, setSendError] = useState("");
@@ -97,7 +99,24 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
   const peerTyping = typing[conversationId];
   const secure = !conversation?.securityError;
 
-  useEffect(() => { loadConversation(conversationId); }, [conversationId]);
+  // Acknowledge only after history has landed, so anything the backfill just
+  // wrote is included; reading the store first missed exactly the messages that
+  // arrived while this device was away. Re-run when the tab becomes visible,
+  // because a chat left open in a background tab is not being read.
+  useEffect(() => {
+    let live = true;
+    loadConversation(conversationId).then(() => {
+      if (live) onAcknowledge?.(conversationId);
+    });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") onAcknowledge?.(conversationId);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      live = false;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [conversationId, onAcknowledge]);
   useEffect(() => {
     savedMessageIds().then(setSaved).catch(() => {});
     notificationSettings().then((settings) => setNotificationsMuted(settings.chats?.[conversationId] === "muted")).catch(() => {});
@@ -155,6 +174,12 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     if (!isTyping.current) {
       isTyping.current = true;
       send("typing.start", { conversation_id: conversationId });
+      // Typing is proof of reading. Opening the chat already acknowledges, but
+      // that fires once; someone who leaves a thread open, reads a message that
+      // lands later and answers it would otherwise leave the sender on two
+      // ticks. Guarded by the same transition as typing.start, so it runs once
+      // per burst rather than once per keystroke.
+      onAcknowledge?.(conversationId);
     }
     clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS);
@@ -170,6 +195,10 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
       ...envelope,
     });
     if (!delivered) setSendError("Offline — this stays sealed on this device until you reconnect.");
+    // Answering is proof of reading, and not every answer is typed: a voice
+    // note, an attachment or a reaction all reach here without ever touching
+    // the composer's typing path.
+    onAcknowledge?.(conversationId);
     return clientId;
   };
 
@@ -313,17 +342,17 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
     <div className="screen chat-screen">
       <header className="chat-header">
         <div className="chat-header-identity">
-          <button className="icon-btn" onClick={onBack} aria-label="Back">‹</button>
+          {onBack && <button className="icon-btn" onClick={onBack} aria-label="Back">{Icons.back}</button>}
           <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
           <div className="chat-header-text"><span className="chat-header-name">{conversation?.peerUsername}</span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
-          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">☎</button>
-          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">▣</button>
-          <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages">★</button>
-          <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"}>{notificationsMuted ? "🔕" : "🔔"}</button>
-          <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation">⌕</button>
-          {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number">{verified ? "🔒" : "🔐"}</button>}
+          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>
+          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">{Icons.callVideo}</button>
+          <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages" title="Saved messages">{Icons.star}</button>
+          <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"} title={notificationsMuted ? "Unmute" : "Mute"}>{notificationsMuted ? Icons.bellOff : Icons.bell}</button>
+          <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation" title="Search">{Icons.search}</button>
+          {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number" title={verified ? "Verified" : "Verify safety number"}>{Icons.shield}</button>}
         </div>
       </header>
 
@@ -367,8 +396,28 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call }
         <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()}>Send</button>
       </div>
 
-      {showSafety && <div className="modal-backdrop" onClick={() => setShowSafety(false)}><div className="modal glass-panel" onClick={(event) => event.stopPropagation()}><h3 className="modal-title">Contact safety number</h3><p className="panel-note">Compare this number with @{conversation?.peerUsername} in person or over another trusted channel.</p><code className="safety-number">{safetyNumber}</code><div className="safety-qr" aria-label="Safety number QR code"><QRCodeSVG value={`timber-safety/v1:${conversation.peerId}:${safetyNumber.replaceAll(" ", "")}`} size={156} includeMargin /></div>{verified ? <p className="field-ok">You marked this contact as verified on this device.</p> : <button className="btn-wood btn-block" onClick={async () => { await setMeta(`safety:${conversation.peerId}`, { verifiedAt: Date.now() }); setVerified(true); }}>Numbers match</button>}<button className="btn-ghost btn-block" onClick={() => setShowSafety(false)}>Done</button></div></div>}
-      {savedOpen && <div className="modal-backdrop" onClick={() => setSavedOpen(false)}><div className="modal glass-panel" onClick={(event) => event.stopPropagation()}><h3 className="modal-title">Saved messages</h3>{savedEntries.length ? <div className="saved-list">{savedEntries.map((message) => <p key={message.id}>{labelForPayload(message.payload)}</p>)}</div> : <p className="panel-note">No saved messages on this device yet.</p>}<p className="panel-note">Saved messages are encrypted and private to this device.</p><button className="btn-ghost btn-block" onClick={() => setSavedOpen(false)}>Done</button></div></div>}
+      {showSafety && (
+        <Modal title="Contact safety number" onClose={() => setShowSafety(false)}>
+          <p className="panel-note">Compare this number with @{conversation?.peerUsername} in person or over another trusted channel.</p>
+          <code className="safety-number">{safetyNumber}</code>
+          <div className="safety-qr" aria-label="Safety number QR code">
+            <QRCodeSVG value={`timber-safety/v1:${conversation.peerId}:${safetyNumber.replaceAll(" ", "")}`} size={156} includeMargin />
+          </div>
+          {verified
+            ? <p className="field-ok">You marked this contact as verified on this device.</p>
+            : <button className="btn-wood btn-block" onClick={async () => { await setMeta(`safety:${conversation.peerId}`, { verifiedAt: Date.now() }); setVerified(true); }}>Numbers match</button>}
+          <button className="btn-ghost btn-block" onClick={() => setShowSafety(false)}>Done</button>
+        </Modal>
+      )}
+      {savedOpen && (
+        <Modal title="Saved messages" onClose={() => setSavedOpen(false)}>
+          {savedEntries.length
+            ? <div className="saved-list">{savedEntries.map((message) => <p key={message.id}>{labelForPayload(message.payload)}</p>)}</div>
+            : <p className="panel-note">No saved messages on this device yet.</p>}
+          <p className="panel-note">Saved messages are encrypted and private to this device.</p>
+          <button className="btn-ghost btn-block" onClick={() => setSavedOpen(false)}>Done</button>
+        </Modal>
+      )}
     </div>
   );
 }

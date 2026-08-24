@@ -1,5 +1,9 @@
 //! The connection-growth path: 21 stages from Seed to Living Grove.
 //!
+//! Stages are named, never numbered, anywhere a person can see them. The number
+//! is an implementation detail for ordering; what someone is told is that they
+//! are a Cedar, and how far along that stage they are.
+//!
 //! Thresholds are cumulative connection-growth points. The curve rewards steady,
 //! bounded practice over roughly a year; it is not a score for health, popularity,
 //! message volume, or time spent in the app.
@@ -27,26 +31,30 @@ macro_rules! ladder {
 }
 
 ladder![
+    // A seed becomes a tree, the tree's wood hardens, its resin fossilises, and
+    // what is left is a gem. The names track the badge's own colour walk in
+    // LevelBadge.jsx -- grey bark, warm heartwood, amber, gold, then crystal --
+    // so the word and the picture always agree.
     (1, "Seed", 0),
     (2, "Sprout", 5),
     (3, "Seedling", 16),
-    (4, "Rooted", 36),
-    (5, "Open", 73),
-    (6, "Present", 130),
-    (7, "Steady", 219),
-    (8, "Connected", 354),
-    (9, "Kindred", 547),
-    (10, "Caring", 807),
-    (11, "Grounded", 1_146),
-    (12, "Supportive", 1_588),
-    (13, "Trusted", 2_135),
-    (14, "Flourishing", 2_812),
-    (15, "Nurturing", 3_645),
-    (16, "Resilient", 4_633),
-    (17, "Thriving", 5_830),
-    (18, "Sheltering", 7_291),
-    (19, "Evergreen", 9_113),
-    (20, "Heartwood", 11_194),
+    (4, "Sapling", 36),
+    (5, "Greenwood", 73),
+    (6, "Willow", 130),
+    (7, "Rowan", 219),
+    (8, "Hazel", 354),
+    (9, "Cedar", 547),
+    (10, "Oak", 807),
+    (11, "Ironbark", 1_146),
+    (12, "Heartwood", 1_588),
+    (13, "Resin", 2_135),
+    (14, "Amber", 2_812),
+    (15, "Copal", 3_645),
+    (16, "Jet", 4_633),
+    (17, "Citrine", 5_830),
+    (18, "Topaz", 7_291),
+    (19, "Sunstone", 9_113),
+    (20, "Moonstone", 11_194),
     (21, "Living Grove", 13_800),
 ];
 
@@ -88,6 +96,22 @@ mod tests {
         assert_eq!(LADDER.first().unwrap().name, "Seed");
         assert_eq!(LADDER.last().unwrap().name, "Living Grove");
         assert_eq!(LADDER.last().unwrap().level, MAX_LEVEL);
+    }
+
+    #[test]
+    fn every_stage_has_a_distinct_name_the_ui_can_show_instead_of_a_number() {
+        // The interface never prints a stage number, so the name is the only
+        // thing distinguishing two stages. A duplicate would make two different
+        // stages indistinguishable to the person holding them.
+        let mut names: Vec<&str> = LADDER.iter().map(|tier| tier.name).collect();
+        names.sort_unstable();
+        let count = names.len();
+        names.dedup();
+        assert_eq!(names.len(), count, "stage names must be unique");
+        assert!(
+            LADDER.iter().all(|tier| !tier.name.is_empty()),
+            "every stage needs a name to show in place of its number",
+        );
     }
 
     #[test]

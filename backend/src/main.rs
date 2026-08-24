@@ -316,7 +316,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(routes::conversations::get_messages),
         )
         .route(
-            "/conversations/{id}/messages/{message_id}/read",
+            "/conversations/{id}/receipts",
+            get(routes::conversations::get_receipts),
+        )
+        .route(
+            "/conversations/{id}/read",
             post(routes::conversations::mark_read),
         )
         .route("/upload", post(routes::upload::upload_file))

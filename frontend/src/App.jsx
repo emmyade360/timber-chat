@@ -6,8 +6,11 @@ import { vaultExists } from "./crypto/vault.js";
 import { closeSession, isUnlocked } from "./crypto/session.js";
 import { clearToken, getToken, logout, runtimeConfigurationError } from "./lib/api.js";
 import { useAutoLock } from "./hooks/useAutoLock.js";
+import { useIsDesktop } from "./hooks/useIsDesktop.js";
 import { useCalmCheckIns } from "./hooks/useCalmCheckIns.js";
 import { bootstrap, reconcileRealtime } from "./lib/sync.js";
+import { consumePendingTarget, subscribePendingTarget } from "./lib/deepLink.js";
+import { ensurePushSubscription } from "./lib/push.js";
 import { useChatStore } from "./store/chatStore.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { useCall } from "./hooks/useCall.js";
@@ -20,8 +23,8 @@ import Explore from "./screens/Explore/Explore.jsx";
 import Profile from "./screens/Profile/Profile.jsx";
 import Settings from "./screens/Me/Me.jsx";
 import LevelBadge from "./components/Level/LevelBadge.jsx";
+import { Icons } from "./components/Settings/icons.jsx";
 import TogetherMark from "./components/Together/TogetherMark.jsx";
-import InvitePanel from "./components/Invite/InvitePanel.jsx";
 import CallOverlay from "./components/Call/CallOverlay.jsx";
 import InstallTimberPrompt from "./components/Install/InstallTimberPrompt.jsx";
 import { usePwaInstall } from "./hooks/usePwaInstall.js";
@@ -67,7 +70,10 @@ export default function App() {
     setPhase("locked");
   }, [revokeAndClearToken]);
 
-  useAutoLock(phase === "ready", lock);
+  // Never lock mid-call: the 30s hidden timer would otherwise fire the moment
+  // someone backgrounds the app to answer, wiping the keys the call needs.
+  const callActive = useChatStore((state) => state.callActive);
+  useAutoLock(phase === "ready" && !callActive, lock);
 
   if (configurationError) {
     return <main className="fatal-error" role="alert"><h1>Timber is unavailable</h1><p>{configurationError}</p></main>;
@@ -76,7 +82,6 @@ export default function App() {
   if (phase === "loading") {
     return (
       <div className="splash">
-        <div className="wood-grain-overlay" />
         <TogetherMark variant="mark" />
         <p className="splash-text">Timber</p>
       </div>
@@ -97,12 +102,14 @@ export default function App() {
   return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
 }
 
+// Four, not five: Growth moved inside Profile. It is a reference screen people
+// visit occasionally, and it was taking a permanent slot in a bar that has to
+// stay readable at 360px.
 const TABS = [
-  { id: "chats", label: "Chats", icon: "💬" },
-  { id: "people", label: "People", icon: "👥" },
-  { id: "explore", label: "Explore", icon: "🧭" },
-  { id: "growth", label: "Growth", icon: null },
-  { id: "profile", label: "Profile", icon: "👤" },
+  { id: "chats", label: "Chats", icon: Icons.chats },
+  { id: "people", label: "People", icon: Icons.people },
+  { id: "explore", label: "Explore", icon: Icons.explore },
+  { id: "profile", label: "Profile", icon: Icons.profile },
 ];
 
 function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled }) {
@@ -110,6 +117,7 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openConversation, setOpenConversation] = useState(null);
   const [manualInstall, setManualInstall] = useState(false);
+  const isDesktop = useIsDesktop();
   const { unread, pendingReceived, me, levelUp, dismissLevelUp } = useChatStore();
   const { send, connected, acknowledge, subscribe } = useWebSocket(true);
   const callController = useCall(send, subscribe);
@@ -121,19 +129,59 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
       .catch(() => {
         /* offline: the local store already painted what this device knows */
       })
-      .finally(() => { resumePendingCalls().catch(() => {}); });
+      .finally(() => {
+        resumePendingCalls().catch(() => {});
+        // Re-register the push endpoint if the browser rotated it while we were
+        // closed; otherwise this device silently stops getting alerts forever.
+        ensurePushSubscription().catch(() => {});
+      });
   }, [resumePendingCalls]);
 
-  // Clearing the badge is a side effect of having the conversation on screen.
+  // Act on a tapped notification. This is the first moment it can be done: the
+  // target is latched at page load, but the shell does not exist until the
+  // vault is unlocked, which a cold start from a notification always goes
+  // through. Both paths land here -- the URL on a cold start, a postMessage
+  // from the service worker when a tab was already open.
   useEffect(() => {
-    if (openConversation) acknowledge(openConversation);
-  }, [openConversation, acknowledge]);
+    const open = async (target) => {
+      if (!target) return;
+      if (target.kind === "people") { setTab("people"); return; }
+      if (!target.conversationId) return;
+      // A call answers itself through resumePendingCalls; showing the thread it
+      // belongs to is the useful thing to do either way.
+      setTab("chats");
+      const known = useChatStore.getState().conversations
+        .some((entry) => entry.id === target.conversationId);
+      if (!known) await reconcileRealtime().catch(() => {});
+      setOpenConversation(target.conversationId);
+      if (target.kind === "call") resumePendingCalls().catch(() => {});
+    };
+
+    open(consumePendingTarget());
+    return subscribePendingTarget((target) => { open(target).catch(() => {}); });
+  }, [resumePendingCalls]);
+
+  // Acknowledging lives in Chat, chained after its history load: doing it here
+  // read the local store before the backfill had written to it, so anything
+  // that arrived while away was left unacknowledged until the next open.
 
   useEffect(() => {
     useChatStore.getState().setActiveConversation(openConversation);
   }, [openConversation]);
 
   const installMode = manualInstall ? "manual" : newAccountInstall ? "new-account" : null;
+  const closeInstall = () => { setManualInstall(false); onInstallHandled(); };
+
+  const levelUpModal = levelUp ? (
+    <div className="levelup-backdrop" onClick={dismissLevelUp}>
+      <div className="levelup glass-panel" onClick={(event) => event.stopPropagation()}>
+        <LevelBadge level={levelUp.level} size={128} name={levelUp.name} />
+        <h2 className="levelup-title">{levelUp.name}</h2>
+        <p className="levelup-sub">A new growth stage</p>
+        <button className="btn-wood btn-block" onClick={dismissLevelUp}>Keep growing</button>
+      </div>
+    </div>
+  ) : null;
 
   const totalUnread = Object.values(unread).reduce((sum, count) => sum + count, 0);
 
@@ -152,131 +200,112 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
     }
   };
 
-  if (openConversation) {
+  const listPane = (
+    <>
+      {tab === "chats" && (
+        <Chats
+          onOpen={setOpenConversation}
+          activeConversationId={isDesktop ? openConversation : null}
+          onFindPeople={() => setTab("people")}
+          onInvite={() => { setTab("profile"); setSettingsOpen(true); }}
+        />
+      )}
+      {tab === "people" && <People onOpenConversation={openWithFriend} />}
+      {tab === "explore" && <Explore onOpenConversation={openWithFriend} />}
+      {tab === "profile" && !settingsOpen && <Profile onOpenSettings={() => setSettingsOpen(true)} />}
+      {tab === "profile" && settingsOpen && (
+        <Settings
+          onBack={() => setSettingsOpen(false)}
+          onOpenExplore={() => { setSettingsOpen(false); setTab("explore"); }}
+          onOpenInstall={() => setManualInstall(true)}
+          onSignOut={onSignOut}
+          onWiped={onWiped}
+        />
+      )}
+    </>
+  );
+
+  const conversation = openConversation ? (
+    <Chat
+      key={openConversation}
+      conversationId={openConversation}
+      send={send}
+      onAcknowledge={acknowledge}
+      onBack={isDesktop ? null : () => setOpenConversation(null)}
+      onStartCall={callController.startCall}
+      call={callController.call}
+    />
+  ) : null;
+
+  const nav = (
+    <nav className="tab-bar" aria-label="Sections">
+      {TABS.map((entry) => {
+        const badge =
+          entry.id === "chats" ? totalUnread : entry.id === "people" ? pendingReceived.length : 0;
+        return (
+          <button
+            key={entry.id}
+            className={`tab ${tab === entry.id ? "tab--active" : ""}`}
+            aria-current={tab === entry.id ? "page" : undefined}
+            title={entry.label}
+            onClick={() => { setSettingsOpen(false); setTab(entry.id); }}
+          >
+            <span className="tab-icon">{entry.icon}</span>
+            <span className="tab-label">{entry.label}</span>
+            {badge > 0 && <span className="tab-badge">{badge > 9 ? "9+" : badge}</span>}
+          </button>
+        );
+      })}
+    </nav>
+  );
+
+  // Phone: one thing at a time, and a conversation takes the whole screen.
+  if (!isDesktop) {
+    if (openConversation) {
+      return (
+        <div className="app-shell">
+          {!connected && <div className="offline-bar">Reconnecting…</div>}
+          {conversation}
+          <CallOverlay {...callController} />
+        </div>
+      );
+    }
     return (
       <div className="app-shell">
-        <div className="wood-grain-overlay" />
         {!connected && <div className="offline-bar">Reconnecting…</div>}
-        <Chat
-          conversationId={openConversation}
-          send={send}
-          onBack={() => setOpenConversation(null)}
-          onStartCall={callController.startCall}
-          call={callController.call}
-        />
+        <main className="shell-main">{listPane}</main>
+        {nav}
+        {levelUpModal}
         <CallOverlay {...callController} />
+        <InstallTimberPrompt open={Boolean(installMode)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
       </div>
     );
   }
 
+  // Desktop: rail, list, conversation. The list stays mounted beside the thread
+  // so opening a message no longer hides navigation or throws away the scroll
+  // position of the list you came from.
   return (
-    <div className="app-shell">
-      <div className="wood-grain-overlay" />
+    <div className="app-shell app-shell--desktop">
       {!connected && <div className="offline-bar">Reconnecting…</div>}
-
+      {nav}
       <main className="shell-main">
-        {tab === "chats" && (
-          <Chats
-            onOpen={setOpenConversation}
-            onFindPeople={() => setTab("people")}
-            onInvite={() => setTab("growth")}
-          />
-        )}
-        {tab === "people" && <People onOpenConversation={openWithFriend} />}
-        {tab === "explore" && <Explore onOpenConversation={openWithFriend} />}
-        {tab === "growth" && <Growth />}
-        {tab === "profile" && !settingsOpen && <Profile onOpenSettings={() => setSettingsOpen(true)} />}
-        {tab === "profile" && settingsOpen && (
-          <Settings
-            onBack={() => setSettingsOpen(false)}
-            onOpenExplore={() => { setSettingsOpen(false); setTab("explore"); }}
-            onOpenInstall={() => setManualInstall(true)}
-            onSignOut={onSignOut}
-            onWiped={onWiped}
-          />
-        )}
+        <div className="pane pane--list">{listPane}</div>
+        <div className="pane pane--detail">
+          {conversation ?? (
+            <div className="pane-empty">
+              <LevelBadge level={me?.level ?? 1} size={64} />
+              <p className="pane-empty-title">Timber</p>
+              <p className="pane-empty-sub">Choose a conversation to start reading.</p>
+            </div>
+          )}
+        </div>
       </main>
 
-      <nav className="tab-bar">
-        {TABS.map((entry) => {
-          const badge =
-            entry.id === "chats" ? totalUnread : entry.id === "people" ? pendingReceived.length : 0;
-          return (
-            <button
-              key={entry.id}
-              className={`tab ${tab === entry.id ? "tab--active" : ""}`}
-              onClick={() => { setSettingsOpen(false); setTab(entry.id); }}
-            >
-              <span className="tab-icon">
-                {entry.icon ?? <LevelBadge level={me?.level ?? 1} size={22} />}
-              </span>
-              <span className="tab-label">{entry.label}</span>
-              {badge > 0 && <span className="tab-badge">{badge > 9 ? "9+" : badge}</span>}
-            </button>
-          );
-        })}
-      </nav>
-
-      {levelUp && (
-        <div className="levelup-backdrop" onClick={dismissLevelUp}>
-          <div className="levelup glass-panel" onClick={(event) => event.stopPropagation()}>
-            <LevelBadge level={levelUp.level} size={128} />
-            <h2 className="levelup-title">{levelUp.name}</h2>
-            <p className="levelup-sub">You reached growth stage {levelUp.level}</p>
-            <button className="btn-wood btn-block" onClick={dismissLevelUp}>
-              Keep growing
-            </button>
-          </div>
-        </div>
-      )}
+      {levelUpModal}
       <CallOverlay {...callController} />
-      <InstallTimberPrompt open={Boolean(installMode)} manual={installMode === "manual"} pwa={pwa} onClose={() => { setManualInstall(false); onInstallHandled(); }} />
+      <InstallTimberPrompt open={Boolean(installMode)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
     </div>
   );
 }
 
-/** The complete connection-growth path, available as its own tab. */
-function Growth() {
-  const { me, ladder } = useChatStore();
-  if (!ladder?.stages || !me) {
-    return <div className="screen"><div className="empty-state">Loading…</div></div>;
-  }
-
-  return (
-    <div className="screen">
-      <header className="screen-header">
-        <h1 className="screen-title">Growth</h1>
-      </header>
-
-      <section className="growth-hero">
-        <LevelBadge level={me.level} size={88} />
-        <p className="profile-level">{me.level_name}</p>
-        <p className="growth-caption">
-          {me.next_level_name
-            ? `${me.growth_to_next.toLocaleString()} growth to ${me.next_level_name}`
-            : "Your growth path is complete"}
-        </p>
-      </section>
-
-      <InvitePanel />
-
-      <ol className="ladder">
-        {ladder.stages.map((tier) => {
-          const reached = me.level >= tier.level;
-          const current = me.level === tier.level;
-          return (
-            <li
-              key={tier.level}
-              className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`}
-            >
-              <LevelBadge level={tier.level} size={34} />
-              <span className="ladder-name">{tier.name}</span>
-              <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
-              {current && <span className="ladder-you">you</span>}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}

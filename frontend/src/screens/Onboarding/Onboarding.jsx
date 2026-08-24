@@ -84,7 +84,6 @@ export default function Onboarding({ onReady }) {
 
   return (
     <div className="onboard-bg">
-      <div className="wood-grain-overlay" />
       <div className="onboard-card glass-panel">
         {inviter && step === "welcome" && (
           <div className="invite-banner">

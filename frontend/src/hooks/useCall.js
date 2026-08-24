@@ -8,6 +8,8 @@ import { payloads } from "../crypto/envelope.js";
 import { openCallSignal, sealCallSignal } from "../db/localStore.js";
 import { sendEncryptedPayload } from "../lib/sync.js";
 import { createCallTonePlayer } from "../lib/callTones.js";
+import { useChatStore } from "../store/chatStore.js";
+import { notifyIncomingCall } from "../lib/notifications.js";
 
 const CONNECT_TIMEOUT_MS = 60_000;
 const AUDIO_CONSTRAINTS = {
@@ -83,6 +85,13 @@ function candidateFromWire(candidate) {
  */
 export function useCall(send, subscribe) {
   const [call, setCall] = useState(idleCall);
+
+  // The idle auto-lock cannot see call state, and backgrounding the app to
+  // answer a call is exactly the thirty seconds it was waiting for. Publish
+  // whether a call is live so it can stand down.
+  useEffect(() => {
+    useChatStore.getState().setCallActive(call.phase !== "idle");
+  }, [call.phase]);
   const callRef = useRef(null);
   const orphanSignals = useRef(new Map());
   const tones = useRef(null);
@@ -359,6 +368,9 @@ export function useCall(send, subscribe) {
           }
           setCall({ ...idleCall(), phase: "incoming", callId: incoming.callId, conversationId: incoming.conversationId, mode: incoming.mode, peerName: incoming.peerName });
           startTone("incoming");
+          // Only reaches the OS when Timber is not the visible tab; when it is,
+          // the call overlay is already covering the screen.
+          void notifyIncomingCall({ username: incoming.peerName, mode: incoming.mode });
           send("call.ringing", { conversation_id: incoming.conversationId, call_id: incoming.callId });
         } catch {
           send("call.end", { conversation_id: payload.conversation_id, call_id: payload.call_id, reason: "failed" });
@@ -461,6 +473,7 @@ export function useCall(send, subscribe) {
     callRef.current = incoming;
     setCall({ ...idleCall(), phase: "incoming", callId: incoming.callId, conversationId: incoming.conversationId, mode: incoming.mode, peerName: incoming.peerName });
     startTone("incoming");
+    void notifyIncomingCall({ username: incoming.peerName, mode: incoming.mode });
     send("call.ringing", { conversation_id: incoming.conversationId, call_id: incoming.callId });
   }, [send, startTone]);
 

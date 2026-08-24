@@ -9,7 +9,9 @@
 import { openDB, deleteDB } from "idb";
 
 export const DB_NAME = "timber";
-export const DB_VERSION = 1;
+// v2 split the message `read` flag into `seen` (the unread badge) and the two
+// receipt-sent flags. See the upgrade below for why that mattered.
+export const DB_VERSION = 2;
 
 export const STORE_VAULT = "vault";
 export const STORE_META = "meta";
@@ -19,10 +21,18 @@ export const STORE_PEERS = "peers";
 
 let dbPromise = null;
 
+/** Set when another tab is holding the old version open; see `blocked` below. */
+let upgradeBlocked = false;
+
+/** True while a second tab is preventing the schema upgrade from completing. */
+export function isUpgradeBlocked() {
+  return upgradeBlocked;
+}
+
 export function timberDb() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion, _newVersion, transaction) {
         if (!db.objectStoreNames.contains(STORE_VAULT)) {
           db.createObjectStore(STORE_VAULT);
         }
@@ -42,9 +52,43 @@ export function timberDb() {
         if (!db.objectStoreNames.contains(STORE_PEERS)) {
           db.createObjectStore(STORE_PEERS, { keyPath: "id" });
         }
+
+        // v1 -> v2. `read` was doing two jobs at once: "the user has seen this"
+        // and "we have successfully told the sender". Once the first was set the
+        // second was unrecoverable, so a read receipt that was never delivered
+        // could never be retried -- the cause of messages stuck on two ticks.
+        if (oldVersion >= 1 && oldVersion < 2) {
+          const messages = transaction.objectStore(STORE_MESSAGES);
+          messages.openCursor().then(function migrate(cursor) {
+            if (!cursor) return undefined;
+            const { read, acknowledged, ...rest } = cursor.value;
+            cursor.update({
+              ...rest,
+              seen: read ? 1 : 0,
+              deliveredAck: acknowledged ? 1 : 0,
+              // Deliberately 0 for everything, including messages already seen.
+              // The first sweep after the upgrade re-emits their read receipts,
+              // which heals conversations that are stuck on two ticks today.
+              // Replay is safe: the server inserts ON CONFLICT DO NOTHING and
+              // only notifies the sender when a row actually changed.
+              readAck: 0,
+            });
+            return cursor.continue().then(migrate);
+          });
+        }
       },
       blocked() {
+        // Another tab is still on the old schema, so this one will hang at the
+        // splash forever unless we say so out loud.
+        upgradeBlocked = true;
         console.warn("Timber database upgrade blocked by another open tab.");
+      },
+      blocking() {
+        // We are the old tab holding someone else up. Close so they can proceed;
+        // this tab reopens the database lazily on its next query.
+        console.warn("Closing an outdated Timber database connection so another tab can upgrade.");
+        dbPromise?.then((db) => db.close()).catch(() => {});
+        dbPromise = null;
       },
     });
   }

@@ -49,7 +49,6 @@ export default function Unlock({ onUnlocked, onWiped }) {
 
   return (
     <div className="onboard-bg">
-      <div className="wood-grain-overlay" />
       <div className="onboard-card glass-panel unlock-card">
         <LevelBadge level={12} size={72} />
         <h1 className="onboard-brand">Timber</h1>

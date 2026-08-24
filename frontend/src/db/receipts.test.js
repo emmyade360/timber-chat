@@ -13,13 +13,16 @@ import { destroyTimberDb } from "./timberDb.js";
 import {
   composeMessage,
   getMessage,
-  markAcknowledged,
+  markDeliveredAck,
+  markReadAck,
   markReceipt,
   keyForConversation,
   messagesFor,
   putMessage,
   putPeer,
+  markSeen,
   unacknowledgedMessageIds,
+  unreadAckedMessageIds,
   upsertConversation,
 } from "./localStore.js";
 import { seal } from "../crypto/envelope.js";
@@ -133,7 +136,106 @@ describe("delivery acknowledgement sweep", () => {
 
   it("stops reporting a message once the relay has taken the receipt", async () => {
     await inboundMessage("in1", "one");
-    await markAcknowledged(["in1"]);
+    await markDeliveredAck(["in1"]);
+    expect(await unacknowledgedMessageIds(CONVERSATION, me.userId)).toEqual([]);
+  });
+});
+
+describe("read receipts survive a failed send", () => {
+  // The bug users hit: `read` meant both "the user saw it" and "we told the
+  // sender". Once it was set the receipt could never be retried, so a message
+  // the peer had plainly read sat on two ticks forever.
+  it("keeps reporting a seen message until the receipt is acknowledged", async () => {
+    await inboundMessage("in1", "hello");
+    await markSeen(CONVERSATION, me.userId);
+
+    // Seen, but the sender has not been told: still queued.
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual(["in1"]);
+    // Still queued on the next sweep, because nothing acknowledged it.
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual(["in1"]);
+
+    await markReadAck(["in1"]);
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual([]);
+  });
+
+  it("does not queue a read receipt for a message the user has not seen", async () => {
+    await inboundMessage("in1", "hello");
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual([]);
+  });
+
+  it("never queues a read receipt for your own message", async () => {
+    await composeMessage({ conversationId: CONVERSATION, payload: payloads.text("mine"), id: "m1" });
+    await markSeen(CONVERSATION, me.userId);
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual([]);
+  });
+
+  it("keeps the delivery and read queues independent", async () => {
+    await inboundMessage("in1", "hello");
+    await markDeliveredAck(["in1"]);
+    await markSeen(CONVERSATION, me.userId);
+    // Delivery told, read not yet.
+    expect(await unacknowledgedMessageIds(CONVERSATION, me.userId)).toEqual([]);
+    expect(await unreadAckedMessageIds(CONVERSATION, me.userId)).toEqual(["in1"]);
+  });
+});
+
+describe("receipts that arrive before their message", () => {
+  // The peer acknowledges the moment the relay echoes a message, which can beat
+  // our own optimistic row being swapped for its real id. Dropping the receipt
+  // there left a tick permanently behind.
+  it("applies a receipt parked before the message was stored", async () => {
+    await markReceipt(["later"], "deliveredAt", 4242);
+
+    const key = await keyForConversation(CONVERSATION);
+    const envelope = seal({
+      key,
+      conversationId: CONVERSATION,
+      senderId: me.userId,
+      payload: payloads.text("hi"),
+    });
+    await putMessage({
+      id: "later",
+      conversationId: CONVERSATION,
+      senderId: me.userId,
+      createdAt: 1000,
+      envelope,
+    });
+
+    const stored = await getMessage("later");
+    expect(stored.deliveredAt).toBe(4242);
+  });
+
+  it("treats a parked read receipt as implying delivery", async () => {
+    await markReceipt(["later"], "readAt", 5000);
+    const key = await keyForConversation(CONVERSATION);
+    await putMessage({
+      id: "later",
+      conversationId: CONVERSATION,
+      senderId: me.userId,
+      createdAt: 1000,
+      envelope: seal({ key, conversationId: CONVERSATION, senderId: me.userId, payload: payloads.text("hi") }),
+    });
+    const stored = await getMessage("later");
+    expect(stored.readAt).toBe(5000);
+    expect(stored.deliveredAt).toBe(5000);
+  });
+});
+
+describe("acknowledgement flags survive a re-store", () => {
+  it("does not resurrect an already-acknowledged message on backfill", async () => {
+    await inboundMessage("in1", "hello");
+    await markDeliveredAck(["in1"]);
+    const stored = await getMessage("in1");
+
+    // Exactly what backfill does: re-store the row as the server described it.
+    await putMessage({
+      id: "in1",
+      conversationId: CONVERSATION,
+      senderId: peer.userId,
+      createdAt: stored.createdAt,
+      envelope: stored.envelope,
+    });
+
     expect(await unacknowledgedMessageIds(CONVERSATION, me.userId)).toEqual([]);
   });
 });

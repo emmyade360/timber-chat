@@ -202,6 +202,16 @@ export async function openCallSignal(conversationId, senderId, envelope) {
 
 // --- messages --------------------------------------------------------------
 
+/** IndexedDB indexes cannot key on booleans, so flags are stored as 0/1. */
+const flag = (value) => (value ? 1 : 0);
+
+/**
+ * Receipts that arrived before their message was stored, keyed by message id.
+ * Drained by `putMessage`. Bounded by the fact that every entry is for a message
+ * the relay has already echoed, so one is always on its way.
+ */
+const deferredReceipts = new Map();
+
 /**
  * Persist a sealed message.
  *
@@ -218,7 +228,12 @@ export async function putMessage(message) {
     senderId: message.senderId,
     createdAt: message.createdAt,
     pending: message.pending ? 1 : 0,
-    read: message.read ? 1 : 0,
+    // `seen` is the unread badge. The two `*Ack` flags are whether we have
+    // successfully told the sender. Keeping them apart is what makes a lost
+    // receipt retryable instead of permanent.
+    seen: flag(message.seen ?? existing?.seen),
+    deliveredAck: flag(message.deliveredAck ?? existing?.deliveredAck),
+    readAck: flag(message.readAck ?? existing?.readAck),
     // Receipts only ever move forward. Re-storing a message during a backfill
     // must not walk three ticks back to one because this page of history was
     // fetched before the peer opened it.
@@ -226,6 +241,19 @@ export async function putMessage(message) {
     readAt: message.readAt ?? existing?.readAt ?? null,
     envelope: message.envelope,
   };
+
+  // A receipt can arrive before the message it describes: the peer acknowledges
+  // the moment the relay echoes it, which can beat our own optimistic row being
+  // swapped for its real id. Apply anything parked for this id now.
+  const deferred = deferredReceipts.get(message.id);
+  if (deferred) {
+    deferredReceipts.delete(message.id);
+    for (const [field, at] of Object.entries(deferred)) {
+      if (!record[field]) record[field] = at;
+    }
+    if (record.readAt && !record.deliveredAt) record.deliveredAt = record.readAt;
+  }
+
   await db.put(STORE_MESSAGES, record);
   await touchConversation(message.conversationId, message.createdAt);
   return record;
@@ -359,7 +387,7 @@ function decryptRecord(record, conversationId, key) {
     deliveredAt: record.deliveredAt ?? null,
     readAt: record.readAt ?? null,
     pending: record.pending === 1,
-    read: record.read === 1,
+    seen: record.seen === 1,
   };
   if (!key) return { ...base, undecryptable: true, reason: "waiting-for-key" };
   try {
@@ -415,13 +443,20 @@ export async function unreadCount(conversationId) {
   let count = 0;
   let cursor = await index.openCursor(range);
   while (cursor) {
-    if (cursor.value.read === 0 && cursor.value.senderId !== identity.userId) count += 1;
+    if (cursor.value.seen === 0 && cursor.value.senderId !== identity.userId) count += 1;
     cursor = await cursor.continue();
   }
   return count;
 }
 
-export async function markRead(conversationId) {
+/**
+ * Mark the peer's messages in a conversation as seen, clearing the badge.
+ *
+ * Deliberately does not touch `readAck`: telling the sender is a separate step
+ * that can fail, and conflating the two is what made a dropped read receipt
+ * unrecoverable.
+ */
+export async function markSeen(conversationId, selfId) {
   const db = await timberDb();
   const tx = db.transaction(STORE_MESSAGES, "readwrite");
   const range = IDBKeyRange.bound(
@@ -431,9 +466,9 @@ export async function markRead(conversationId) {
   const marked = [];
   let cursor = await tx.store.index("byConversation").openCursor(range);
   while (cursor) {
-    if (cursor.value.read === 0) {
+    if (cursor.value.seen === 0 && cursor.value.senderId !== selfId) {
       marked.push(cursor.value.id);
-      await cursor.update({ ...cursor.value, read: 1 });
+      await cursor.update({ ...cursor.value, seen: 1 });
     }
     cursor = await cursor.continue();
   }
@@ -454,7 +489,12 @@ export async function markReceipt(messageIds, field, at = Date.now()) {
   const changed = [];
   for (const id of messageIds) {
     const record = await tx.store.get(id);
-    if (!record || record[field]) continue;
+    if (!record) {
+      // The message is not here yet -- park it for `putMessage` to apply.
+      deferredReceipts.set(id, { ...(deferredReceipts.get(id) ?? {}), [field]: at });
+      continue;
+    }
+    if (record[field]) continue;
     const next = { ...record, [field]: at };
     if (field === "readAt" && !next.deliveredAt) next.deliveredAt = at;
     await tx.store.put(next);
@@ -465,13 +505,14 @@ export async function markReceipt(messageIds, field, at = Date.now()) {
 }
 
 /**
- * Messages from the peer that this device holds but has never acknowledged.
+ * Peer messages this device holds whose sender has not been told yet.
  *
- * This is what turns the sender's single tick into two after the recipient
- * comes back online: the backlog is swept once the socket is up, rather than
- * relying on each message having been acknowledged as it arrived.
+ * `field` is `deliveredAck` ("we have it") or `readAck` ("it was opened").
+ * Sweeping is what turns the sender's ticks: the backlog case that matters is a
+ * device that was offline, where messages were stored by a backfill and there
+ * was never a moment to acknowledge them one at a time.
  */
-export async function unacknowledgedMessageIds(conversationId, selfId, limit = 500) {
+async function unsentReceiptIds(conversationId, selfId, field, extra, limit) {
   const db = await timberDb();
   const range = IDBKeyRange.bound(
     [conversationId, Number.MIN_SAFE_INTEGER],
@@ -481,7 +522,12 @@ export async function unacknowledgedMessageIds(conversationId, selfId, limit = 5
   let cursor = await db.transaction(STORE_MESSAGES).store.index("byConversation").openCursor(range);
   while (cursor && ids.length < limit) {
     const record = cursor.value;
-    if (record.senderId !== selfId && record.pending === 0 && !record.acknowledged) {
+    if (
+      record.senderId !== selfId
+      && record.pending === 0
+      && !record[field]
+      && (!extra || extra(record))
+    ) {
       ids.push(record.id);
     }
     cursor = await cursor.continue();
@@ -489,16 +535,32 @@ export async function unacknowledgedMessageIds(conversationId, selfId, limit = 5
   return ids;
 }
 
-/** Remember that the relay accepted our delivery receipt, so we stop resending. */
-export async function markAcknowledged(messageIds) {
+/** Messages we hold but have not confirmed delivery of. */
+export function unacknowledgedMessageIds(conversationId, selfId, limit = 500) {
+  return unsentReceiptIds(conversationId, selfId, "deliveredAck", null, limit);
+}
+
+/** Messages the user has opened but whose sender has not been told. */
+export function unreadAckedMessageIds(conversationId, selfId, limit = 500) {
+  return unsentReceiptIds(conversationId, selfId, "readAck", (record) => record.seen === 1, limit);
+}
+
+async function markAck(messageIds, field) {
+  if (!messageIds.length) return;
   const db = await timberDb();
   const tx = db.transaction(STORE_MESSAGES, "readwrite");
   for (const id of messageIds) {
     const record = await tx.store.get(id);
-    if (record && !record.acknowledged) await tx.store.put({ ...record, acknowledged: 1 });
+    if (record && !record[field]) await tx.store.put({ ...record, [field]: 1 });
   }
   await tx.done;
 }
+
+/** Remember that the relay took our delivery receipt, so we stop resending. */
+export const markDeliveredAck = (messageIds) => markAck(messageIds, "deliveredAck");
+
+/** Remember that the relay took our read receipt. */
+export const markReadAck = (messageIds) => markAck(messageIds, "readAck");
 
 /** Messages awaiting delivery, oldest first, for the reconnect outbox. */
 export async function pendingMessages() {

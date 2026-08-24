@@ -142,6 +142,9 @@ pub async fn send_friend_request(
         "friend.request",
         json!({ "from": user.id, "username": user.username }),
     );
+    // Reaches a device whose app is fully closed; the WebSocket event above
+    // covers every case where Timber is still running.
+    crate::routes::calls::send_friend_push(&state, input.receiver_id, "friend-request", &user.username).await;
 
     Ok(Json(json!({
         "success": true,
@@ -236,6 +239,7 @@ pub async fn respond_friend_request(
         "friend.accepted",
         json!({ "by": user.id, "username": user.username, "conversation_id": conversation_id }),
     );
+    crate::routes::calls::send_friend_push(&state, sender_id, "friend-accepted", &user.username).await;
 
     Ok(Json(json!({
         "success": true,

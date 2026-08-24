@@ -17,10 +17,13 @@ export const useChatStore = create((set, get) => ({
   onlineUsers: new Set(),
   levelUp: null,
   syncing: false,
+  /** True whenever a call is being set up, ringing, or connected. */
+  callActive: false,
 
   setMe: (me) => set({ me }),
   setLadder: (ladder) => set({ ladder }),
   setSyncing: (syncing) => set({ syncing }),
+  setCallActive: (callActive) => set({ callActive }),
   setConversations: (conversations) => set({ conversations }),
   removeConversation: (conversationId) =>
     set((state) => {
@@ -120,6 +123,7 @@ export const useChatStore = create((set, get) => ({
   reset: () =>
     set({
       me: null,
+      callActive: false,
       conversations: [],
       messages: {},
       unread: {},

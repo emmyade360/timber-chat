@@ -268,6 +268,14 @@ impl From<MessageRow> for StoredMessage {
     }
 }
 
+/// Receipt state for one of the caller's own messages. Ids and timestamps only.
+#[derive(FromRow, Serialize)]
+pub struct MessageReceipt {
+    pub id: Uuid,
+    pub delivered_at: Option<DateTime<Utc>>,
+    pub read_at: Option<DateTime<Utc>>,
+}
+
 #[derive(FromRow)]
 pub struct ConversationRow {
     pub id: Uuid,

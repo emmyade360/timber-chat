@@ -12,7 +12,7 @@ import {
   keyForConversation,
   lastMessage,
   listConversations,
-  markRead,
+  markSeen,
   messagesFor,
   pendingMessages,
   PeerKeyVerificationError,
@@ -77,14 +77,19 @@ describe("encryption at rest", () => {
     expect(Object.keys(raw).sort()).toEqual([
       "conversationId",
       "createdAt",
+      // Whether we have told the sender. Separate from `seen` so that a receipt
+      // we failed to deliver stays retryable instead of being lost.
+      "deliveredAck",
       // Receipt timestamps: when the peer's device took the ciphertext and when
       // they opened it. Both are metadata about transit, never about content.
       "deliveredAt",
       "envelope",
       "id",
       "pending",
-      "read",
+      "readAck",
       "readAt",
+      // Whether the user has viewed it: drives the unread badge only.
+      "seen",
       "senderId",
     ]);
   });
@@ -308,7 +313,7 @@ describe("unread tracking", () => {
     expect(await unreadCount(CONVERSATION)).toBe(1);
   });
 
-  it("clears the count on markRead", async () => {
+  it("clears the count and reports what to acknowledge", async () => {
     await putMessage({
       id: "in1",
       conversationId: CONVERSATION,
@@ -316,7 +321,7 @@ describe("unread tracking", () => {
       createdAt: 2000,
       envelope: { envelope_version: 1, nonce: "", ciphertext: "" },
     });
-    expect(await markRead(CONVERSATION)).toEqual(["in1"]);
+    expect(await markSeen(CONVERSATION, me.userId)).toEqual(["in1"]);
     expect(await unreadCount(CONVERSATION)).toBe(0);
   });
 });

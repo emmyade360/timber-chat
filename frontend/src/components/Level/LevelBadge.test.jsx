@@ -23,6 +23,17 @@ describe("growth-stage badges", () => {
     expect(rings(rendered[4])).toBeLessThan(rings(rendered[9]));
   });
 
+  it("names the stage rather than numbering it", () => {
+    // The interface never shows a stage number, so the badge must not smuggle
+    // one back in through its accessible name.
+    const named = renderToStaticMarkup(<LevelBadge level={12} size={32} name="Heartwood" />);
+    expect(named).toContain('aria-label="Heartwood growth stage"');
+    expect(named).not.toMatch(/aria-label="[^"]*\d/);
+
+    const unnamed = renderToStaticMarkup(<LevelBadge level={12} size={32} />);
+    expect(unnamed).toContain('aria-label="Growth stage"');
+  });
+
   it("clamps out-of-range stages instead of rendering nothing", () => {
     for (const level of [0, -5, 99, null, undefined, NaN]) {
       const svg = renderToStaticMarkup(<LevelBadge level={level} size={32} />);
@@ -44,6 +55,6 @@ describe("growth-stage badges", () => {
   });
 
   it("labels each badge for screen readers", () => {
-    expect(rendered[11]).toContain('aria-label="Growth stage 12"');
+    expect(rendered[11]).toContain('aria-label="Growth stage"');
   });
 });

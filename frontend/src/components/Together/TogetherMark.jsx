@@ -29,14 +29,14 @@ function LogFace({ rings, seed }) {
     <svg className="together-face" viewBox="0 0 100 100" aria-hidden="true">
       <defs>
         <radialGradient id={`together-core-${seed}`} cx="38%" cy="32%">
-          <stop offset="0%" stopColor="#A9713F" stopOpacity="0.7" />
-          <stop offset="55%" stopColor="#6E421F" stopOpacity="0.55" />
-          <stop offset="100%" stopColor="#4A2C18" />
+          <stop offset="0%" stopColor="#8A8F98" stopOpacity="0.7" />
+          <stop offset="55%" stopColor="#4E5058" stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#2B2D31" />
         </radialGradient>
         <linearGradient id={`together-bezel-${seed}`} x1="0" y1="0" x2="0.35" y2="1">
           <stop offset="0%" stopColor="#D4894A" />
-          <stop offset="45%" stopColor="#8B5E3C" />
-          <stop offset="100%" stopColor="#3E2415" />
+          <stop offset="45%" stopColor="#6D7079" />
+          <stop offset="100%" stopColor="#232428" />
         </linearGradient>
       </defs>
 
@@ -52,14 +52,14 @@ function LogFace({ rings, seed }) {
             cy={heartY}
             r={radius}
             fill="none"
-            stroke={index % 2 === 0 ? "#E8C99A" : "#C49A6C"}
+            stroke={index % 2 === 0 ? "#E2C48C" : "#949BA4"}
             strokeWidth={index % 2 === 0 ? 1.8 : 1}
             opacity={0.4 + (index / rings) * 0.42}
           />
         );
       })}
 
-      <circle cx={heartX} cy={heartY} r="4.4" fill="#3E2415" opacity="0.9" />
+      <circle cx={heartX} cy={heartY} r="4.4" fill="#232428" opacity="0.9" />
       <circle cx={heartX} cy={heartY} r="4.4" fill="none" stroke="#D4894A" strokeWidth="0.7" opacity="0.75" />
 
       {/* One specular sweep keeps the face from reading flat under the tilt. */}
@@ -93,7 +93,7 @@ function Log({ side, rings, seed }) {
 export default function TogetherMark({ variant = "hero", motto = "Two rings. One grain.", caption = "Every conversation adds a ring. Timber is where people grow together." }) {
   return (
     <div className={`together together--${variant}`}>
-      <div className="wood-frame together-frame">
+      <div className="together-frame">
         <div
           className="together-stage"
           role="img"

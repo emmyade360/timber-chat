@@ -10,10 +10,18 @@ import { createWebSocketTicket, getToken } from "../lib/api.js";
 import { signIn } from "../lib/auth.js";
 import { currentIdentity, isUnlocked } from "../crypto/session.js";
 import { useChatStore } from "../store/chatStore.js";
-import { acknowledgeDelivery, markConversationRead, receiveMessage, reconcileRealtime } from "../lib/sync.js";
+import {
+  acknowledgeDelivery,
+  acknowledgeRead,
+  documentVisible,
+  markConversationRead,
+  receiveMessage,
+  reconcileRealtime,
+  setRealtimeSend,
+} from "../lib/sync.js";
 import { markReceipt } from "../db/localStore.js";
 import { getCurrentUser, getFriends } from "../lib/api.js";
-import { notifyIncoming } from "../lib/notifications.js";
+import { notifyFriendAccepted, notifyFriendRequest, notifyIncoming } from "../lib/notifications.js";
 
 const MAX_BACKOFF_MS = 15_000;
 const MAX_REALTIME_EVENT_BYTES = 96 * 1024;
@@ -93,11 +101,14 @@ export function useWebSocket(enabled) {
       socket.onopen = () => {
         attemptRef.current = 0;
         setConnected(true);
+        // Every receipt sweep goes through this registry rather than through an
+        // argument, so a reconcile started by any caller can still send.
+        setRealtimeSend(send);
         // Covers messages and relationships that changed while this tab was
         // offline, sleeping, or connected to another API instance.
-        reconcileRealtime(send).catch(() => {});
+        reconcileRealtime().catch(() => {});
         reconcileTimer = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) reconcileRealtime(send).catch(() => {});
+          if (socket.readyState === WebSocket.OPEN) reconcileRealtime().catch(() => {});
         }, 30_000);
       };
 
@@ -120,7 +131,14 @@ export function useWebSocket(enabled) {
             {
               const received = await receiveMessage(payload);
               if (received && !received.mine) {
-                await acknowledgeDelivery(payload.conversation_id, send);
+                await acknowledgeDelivery(payload.conversation_id);
+                // A message landing in a chat the user is already looking at is
+                // read the moment it arrives. Without this it was stored seen,
+                // so the "mark everything unseen" sweep never found it and the
+                // sender sat on two ticks no matter how quickly they replied.
+                if (received.isActive && documentVisible()) {
+                  await acknowledgeRead(payload.conversation_id);
+                }
               }
               if (received) await notifyIncoming({
                 ...received,
@@ -152,8 +170,18 @@ export function useWebSocket(enabled) {
             await markReceipt(payload.message_ids ?? [], "deliveredAt");
             break;
           case "receipt.read":
-            store.markReceipt([payload.message_id], "readAt");
-            await markReceipt([payload.message_id], "readAt");
+            {
+              // Batched now; the single-id shape still arrives from clients
+              // running a cached shell from before the change.
+              const ids = payload.message_ids ?? (payload.message_id ? [payload.message_id] : []);
+              store.markReceipt(ids, "readAt");
+              await markReceipt(ids, "readAt");
+            }
+            break;
+          case "error":
+            // The relay rejected something we sent. Receipts retry on the next
+            // sweep; surfacing it stops the next such bug being invisible.
+            console.warn("Timber relay rejected an event:", payload?.scope ?? "unknown");
             break;
           case "call.offer":
           case "call.answer":
@@ -191,6 +219,12 @@ export function useWebSocket(enabled) {
             } catch {
               /* offline; the next bootstrap will reconcile */
             }
+            // Announced after the refetch, so opening the notification lands on
+            // a screen that already shows the request rather than a stale one.
+            // A removal is deliberately silent: nobody needs a popup telling
+            // them someone left.
+            if (type === "friend.request") await notifyFriendRequest(payload);
+            if (type === "friend.accepted") await notifyFriendAccepted(payload);
             break;
           default:
             break;
@@ -214,6 +248,7 @@ export function useWebSocket(enabled) {
 
     return () => {
       closedByUs.current = true;
+      setRealtimeSend(null);
       clearTimeout(reconnectTimer);
       clearInterval(reconcileTimer);
       for (const timeout of typingTimers.values()) clearTimeout(timeout);
@@ -226,16 +261,14 @@ export function useWebSocket(enabled) {
     // the lint honest without ever re-opening the socket.
   }, [enabled, send]);
 
-  /** Tell the sender we read their messages, and clear our own badge. */
-  const acknowledge = useCallback(
-    async (conversationId) => {
-      const changed = await markConversationRead(conversationId);
-      for (const messageId of changed) {
-        send("receipt.read", { conversation_id: conversationId, message_id: messageId });
-      }
-    },
-    [send],
-  );
+  /**
+   * Clear our own badge, then tell the sender.
+   *
+   * One batched frame rather than one per message: the old loop ran straight
+   * into the relay's 60-per-minute ceiling on a catch-up, and the receipts it
+   * dropped were gone for good because the messages had already been marked.
+   */
+  const acknowledge = useCallback((conversationId) => markConversationRead(conversationId), []);
 
   return { send, connected, acknowledge, subscribe };
 }

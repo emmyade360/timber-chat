@@ -14,6 +14,7 @@ import {
   userMessage,
 } from "../../lib/api.js";
 import { reconcileRealtime } from "../../lib/sync.js";
+import Modal from "../../components/Modal.jsx";
 
 const EMPTY_PROFILE = {
   adult_confirmed: false,
@@ -254,9 +255,7 @@ export default function Explore({ onOpenConversation }) {
       )}
 
       {reporting && (
-        <div className="modal-backdrop" onClick={() => setReporting(null)}>
-          <div className="modal glass-panel" onClick={(event) => event.stopPropagation()}>
-            <h3 className="modal-title">Safety options</h3>
+        <Modal title="Safety options" onClose={() => setReporting(null)}>
             <p className="panel-note">Blocking removes both cards from future Explore decks. Reporting also hides this card and sends it to a human review queue.</p>
             <button className="btn-danger btn-block" disabled={busy} onClick={async () => {
               await act(reporting, blockExploreCard);
@@ -268,8 +267,7 @@ export default function Explore({ onOpenConversation }) {
               <button className="btn-ghost btn-block" disabled={busy} onClick={() => report(reporting, "unsafe")}>Report unsafe behavior</button>
             </div>
             <button className="btn-ghost btn-block" onClick={() => setReporting(null)}>Cancel</button>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

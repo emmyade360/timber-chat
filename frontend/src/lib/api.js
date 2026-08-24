@@ -147,6 +147,18 @@ export const updateCurrentUser = (profile) => api.patch("/api/users/me", profile
 export const getConversations = () => api.get("/api/conversations");
 export const getHistory = (conversationId, params) =>
   api.get(`/api/conversations/${conversationId}/messages`, { params });
+/**
+ * Receipt state for our own recent messages in a conversation.
+ *
+ * Separate from history because history skips messages the device already
+ * holds -- which is exactly the set whose receipts need repairing. This returns
+ * ids and two timestamps, no ciphertext.
+ */
+export const getReceipts = (conversationId, since) =>
+  api.get(`/api/conversations/${conversationId}/receipts`, { params: since ? { since } : {} });
+/** Durable read receipts for when the socket is down. */
+export const postReadReceipts = (conversationId, messageIds) =>
+  api.post(`/api/conversations/${conversationId}/read`, { message_ids: messageIds });
 export const getFriends = () => api.get("/api/friends");
 export const getPendingRequestsCount = () => api.get("/api/friends/requests/count");
 export const searchUsers = (q) => api.get("/api/users/search", { params: { q } });
