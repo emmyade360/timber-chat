@@ -214,6 +214,17 @@ fn normalize_avatar_url(value: Option<String>) -> Result<Option<String>, ApiErro
     Ok(Some(value.to_owned()))
 }
 
+/// People are shown as `@username` throughout the UI. Accept that natural
+/// search form as well as the bare username without making `@` part of the
+/// database lookup.
+fn normalize_user_search(value: Option<String>) -> String {
+    value
+        .unwrap_or_default()
+        .trim()
+        .trim_start_matches('@')
+        .to_lowercase()
+}
+
 pub async fn update_current_user(
     State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
@@ -263,7 +274,7 @@ pub async fn search_users(
     {
         return Err(ApiError::TooManyRequests("Too many searches. Try again shortly.".into()));
     }
-    let search = query.q.unwrap_or_default().trim().to_lowercase();
+    let search = normalize_user_search(query.q);
     if search.len() < 2 {
         return Ok(Json(Vec::new()));
     }
@@ -393,7 +404,7 @@ pub async fn check_username(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_avatar_url;
+    use super::{normalize_avatar_url, normalize_user_search};
 
     #[test]
     fn profile_photo_accepts_only_safe_https_urls() {
@@ -408,5 +419,11 @@ mod tests {
                 .is_err()
         );
         assert!(normalize_avatar_url(Some("not a URL".into())).is_err());
+    }
+
+    #[test]
+    fn people_search_accepts_a_displayed_at_username() {
+        assert_eq!(normalize_user_search(Some("  @Mango_Tree ".into())), "mango_tree");
+        assert_eq!(normalize_user_search(Some("mango_tree".into())), "mango_tree");
     }
 }

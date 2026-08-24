@@ -17,6 +17,10 @@ import { useChatStore } from "../../store/chatStore.js";
 import { reconcileRealtime } from "../../lib/sync.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
 
+function normalizedSearchTerm(value) {
+  return value.trim().replace(/^@+/, "");
+}
+
 export default function People({ onOpenConversation }) {
   const { friends, pendingReceived, pendingSent, setFriends, onlineUsers, me } = useChatStore();
   const [query, setQuery] = useState("");
@@ -24,7 +28,8 @@ export default function People({ onOpenConversation }) {
   const [searchState, setSearchState] = useState("idle");
   const [busyId, setBusyId] = useState(null);
   const [notice, setNotice] = useState("");
-  const hasSearchTerm = query.trim().length >= 2;
+  const term = normalizedSearchTerm(query);
+  const hasSearchTerm = term.length >= 2;
   const visibleResults = hasSearchTerm ? results : [];
 
   const refresh = async () => {
@@ -35,13 +40,13 @@ export default function People({ onOpenConversation }) {
   // Debounced so typing a username does not fire a request per keystroke, and
   // guarded so a slow response for an older query cannot replace newer results.
   useEffect(() => {
-    const term = query.trim();
-    if (term.length < 2) return undefined;
+    const searchTerm = normalizedSearchTerm(query);
+    if (searchTerm.length < 2) return undefined;
     let active = true;
     const timer = setTimeout(async () => {
       setSearchState("searching");
       try {
-        const response = await searchUsers(term);
+        const response = await searchUsers(searchTerm);
         if (!active) return;
         setResults(response.data);
         setSearchState("done");
@@ -50,7 +55,7 @@ export default function People({ onOpenConversation }) {
         setResults([]);
         setSearchState("error");
       }
-    }, 250);
+    }, 150);
     return () => { active = false; clearTimeout(timer); };
   }, [query]);
 
@@ -60,7 +65,7 @@ export default function People({ onOpenConversation }) {
     try {
       const result = await fn();
       await refresh();
-      if (query.trim().length >= 2) setResults((await searchUsers(query.trim())).data);
+      if (term.length >= 2) setResults((await searchUsers(term)).data);
       if (successMessage) setNotice(successMessage);
       return result;
     } catch (error) {
@@ -94,7 +99,7 @@ export default function People({ onOpenConversation }) {
   const changeQuery = (value) => {
     setQuery(value);
     setResults([]);
-    setSearchState(value.trim().length >= 2 ? "searching" : "idle");
+    setSearchState(normalizedSearchTerm(value).length >= 2 ? "searching" : "idle");
   };
 
   return (
