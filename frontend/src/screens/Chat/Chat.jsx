@@ -21,7 +21,6 @@ import { loadConversation, loadOlder, prepareOutgoingPayload } from "../../lib/s
 import { notificationSettings, setChatNotification } from "../../lib/notifications.js";
 import { timeAgo } from "../../lib/time.js";
 import { Icons } from "../../components/Settings/icons.jsx";
-import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import Modal from "../../components/Modal.jsx";
 
 const TYPING_IDLE_MS = 1500;
@@ -344,19 +343,15 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
     <div className="screen chat-screen">
       <header className="chat-header">
         <div className="chat-header-identity">
-          {onBack && <button className="icon-btn" onClick={onBack} aria-label="Back">{Icons.back}</button>}
-          <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
-          <div className="chat-header-text"><span className="chat-header-name">
-              {conversation?.peerUsername ?? "Private contact"}
-              {conversation?.peerLevel && (
-                <LevelBadge level={conversation.peerLevel} size={15} name={conversation.peerLevelName} className="name-gem" />
-              )}
-            </span><span className="chat-header-sub">{peerTyping && "typing…"}</span></div>
+          {onBack && <button className="icon-btn chat-header-back" onClick={onBack} aria-label="Back">{Icons.back}</button>}
+          <div className="chat-header-text">
+            <span className="chat-header-name">{conversation?.peerUsername ?? "Private contact"}</span>
+            <span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : ""}</span>
+          </div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
-          <span className="chat-header-security" aria-label="End-to-end encrypted">▣ E2E encrypted</span>
-          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>
           <div className="chat-header-extra">
+            <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>
             <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">{Icons.callVideo}</button>
             <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages" title="Saved messages">{Icons.star}</button>
             <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"} title={notificationsMuted ? "Unmute" : "Mute"}>{notificationsMuted ? Icons.bellOff : Icons.bell}</button>
