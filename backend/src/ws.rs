@@ -498,7 +498,7 @@ async fn notify_offline_recipient(
     conversation_id: Uuid,
     username: &str,
 ) {
-    if state.online_users.lock().await.contains_key(&peer) {
+    if !should_send_offline_push(state.online_users.lock().await.contains_key(&peer)) {
         return;
     }
     let state = state.clone();
@@ -506,6 +506,10 @@ async fn notify_offline_recipient(
     tokio::spawn(async move {
         crate::routes::calls::send_message_push(&state, peer, conversation_id, &username).await;
     });
+}
+
+fn should_send_offline_push(recipient_online: bool) -> bool {
+    !recipient_online
 }
 
 /// Record read receipts and report which ones were new.
@@ -595,7 +599,7 @@ async fn relay_call_offer(
         }),
     );
     let recipient_online = state.online_users.lock().await.contains_key(&peer);
-    if !recipient_online && crate::routes::calls::send_call_push(state, peer, input.call_id, &user.username, media).await {
+    if should_send_offline_push(recipient_online) && crate::routes::calls::send_call_push(state, peer, input.call_id, &user.username, media).await {
         publish(state, EventTarget::User(user.id), "call.ringing", json!({
             "conversation_id": input.conversation_id, "call_id": input.call_id, "from": peer,
         }));
@@ -1006,5 +1010,11 @@ mod tests {
             ciphertext: "v=0\r\nm=audio".into(),
         };
         assert!(validate_call_signal(plaintext_sdp).is_err());
+    }
+
+    #[test]
+    fn offline_push_is_skipped_for_active_socket_recipients() {
+        assert!(should_send_offline_push(false));
+        assert!(!should_send_offline_push(true));
     }
 }

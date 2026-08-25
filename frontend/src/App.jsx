@@ -10,7 +10,7 @@ import { useIsDesktop } from "./hooks/useIsDesktop.js";
 import { useCalmCheckIns } from "./hooks/useCalmCheckIns.js";
 import { bootstrap, reconcileRealtime } from "./lib/sync.js";
 import { consumePendingTarget, subscribePendingTarget } from "./lib/deepLink.js";
-import { ensurePushSubscription } from "./lib/push.js";
+import { disablePushAlerts, ensurePushSubscription } from "./lib/push.js";
 import { useChatStore } from "./store/chatStore.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { useCall } from "./hooks/useCall.js";
@@ -59,7 +59,11 @@ export default function App() {
     clearToken();
   }, []);
 
-  const wiped = useCallback((message) => {
+  const wiped = useCallback(async (message) => {
+    // Wipe the browser subscription before clearing the authenticated token.
+    // This removes the endpoint from every device/account registration instead
+    // of leaving a stale service-worker subscription behind after a reset.
+    await disablePushAlerts().catch(() => {});
     closeSession();
     revokeAndClearToken();
     useChatStore.getState().reset();
@@ -179,7 +183,11 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstal
   }, [openConversation]);
 
   const installMode = manualInstall ? "manual" : newAccountInstall ? "new-account" : null;
-  const closeInstall = () => { setManualInstall(false); onInstallHandled(); };
+  const closeInstall = () => {
+    setManualInstall(false);
+    pwa.acknowledgeInstalled?.();
+    onInstallHandled();
+  };
 
   const levelUpModal = levelUp ? (
     <div className="levelup-backdrop" onClick={dismissLevelUp}>
@@ -311,7 +319,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstal
         {nav}
         {levelUpModal}
         <CallOverlay {...callController} />
-        <InstallTimberPrompt open={Boolean(installMode)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
+        <InstallTimberPrompt open={Boolean(installMode || pwa.justInstalled)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
       </div>
     );
   }
@@ -338,7 +346,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstal
 
       {levelUpModal}
       <CallOverlay {...callController} />
-      <InstallTimberPrompt open={Boolean(installMode)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
+      <InstallTimberPrompt open={Boolean(installMode || pwa.justInstalled)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
     </div>
   );
 }

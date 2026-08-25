@@ -11,7 +11,8 @@
 
 import { useEffect, useState } from 'react';
 import { getMeta, setMeta } from '../../db/localStore.js';
-import { alertsBlocked, alertsFullyEnabled, enableAllAlerts } from '../../lib/alerts.js';
+import { alertReadiness, alertsBlocked, alertsFullyEnabled, enableAllAlerts, pushStatusMessage } from '../../lib/alerts.js';
+import { PUSH_STATUS } from '../../lib/push.js';
 
 const INSTALL_KEY = 'pwa-install-prompt';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,6 +20,7 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 export default function InstallTimberPrompt({ open, manual = false, pwa, onClose }) {
   const [eligible, setEligible] = useState(false);
   const [alertsOn, setAlertsOn] = useState(true);
+  const [pushStatus, setPushStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -26,12 +28,14 @@ export default function InstallTimberPrompt({ open, manual = false, pwa, onClose
     let active = true;
     if (!open) return undefined;
     (async () => {
-      const [choice, enabled] = await Promise.all([
+      const [choice, enabled, readiness] = await Promise.all([
         getMeta(INSTALL_KEY).catch(() => null),
         alertsFullyEnabled().catch(() => false),
+        alertReadiness().catch(() => ({ push: { status: PUSH_STATUS.unavailable } })),
       ]);
       if (!active) return;
       setAlertsOn(enabled);
+      setPushStatus(readiness.push.status);
       // Nothing left to offer: alerts are on and the app is installed or cannot be.
       const nothingToOffer = enabled && (pwa.installed || (!pwa.canInstall && !pwa.isIos));
       const snoozed = !manual && (choice?.never || (choice?.remindAt ?? 0) > Date.now());
@@ -54,11 +58,17 @@ export default function InstallTimberPrompt({ open, manual = false, pwa, onClose
     try {
       const { push } = await enableAllAlerts();
       setAlertsOn(true);
+      const readiness = await alertReadiness().catch(() => null);
+      if (readiness) setPushStatus(readiness.push.status);
       setNotice(push
         ? 'Calls and messages will reach this device even when Timber is closed.'
-        : 'Notifications are on. This browser cannot deliver them while Timber is fully closed.');
+        : pushStatusMessage(readiness?.push.status));
     } catch (error) {
-      setNotice(error.message || 'Notifications were not allowed by this browser.');
+      const readiness = await alertReadiness().catch(() => null);
+      if (readiness) setPushStatus(readiness.push.status);
+      setNotice(readiness?.push.status
+        ? pushStatusMessage(readiness.push.status)
+        : (error.message || 'Notifications were not allowed by this browser.'));
     } finally {
       setBusy(false);
     }
@@ -70,6 +80,7 @@ export default function InstallTimberPrompt({ open, manual = false, pwa, onClose
   };
 
   const showInstall = !pwa.installed && (pwa.canInstall || pwa.isIos);
+  const pushUnavailable = [PUSH_STATUS.unsupported, PUSH_STATUS.missingKey, PUSH_STATUS.denied].includes(pushStatus);
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -87,6 +98,8 @@ export default function InstallTimberPrompt({ open, manual = false, pwa, onClose
                 Notifications are blocked for this site. Turn them back on in your
                 browser’s site settings, then try again.
               </p>
+            ) : pushUnavailable ? (
+              <p className="onboard-warning">{pushStatusMessage(pushStatus)}</p>
             ) : (
               <button className="btn-wood btn-block" disabled={busy} onClick={turnOnAlerts}>
                 {busy ? 'Asking…' : 'Turn on notifications'}

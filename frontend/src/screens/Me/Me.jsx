@@ -21,8 +21,8 @@ import {
   pendingDigestCount,
   updateNotificationSettings,
 } from "../../lib/notifications.js";
-import { disablePushAlerts, enablePushAlerts, pushAlertsEnabled, pushSupported } from "../../lib/push.js";
-import { enableAllAlerts } from "../../lib/alerts.js";
+import { disablePushAlerts, pushReadiness, pushSupported, PUSH_STATUS } from "../../lib/push.js";
+import { enableAllAlerts, pushStatusMessage } from "../../lib/alerts.js";
 import { getHealth } from "../../lib/api.js";
 import Modal from "../../components/Modal.jsx";
 
@@ -244,21 +244,23 @@ function NotificationGroup() {
   const [settings, setSettings] = useState({ enabled: false, digest: false, checkIns: false });
   const [digestCount, setDigestCount] = useState(0);
   const [calls, setCalls] = useState(false);
+  const [pushStatus, setPushStatus] = useState(PUSH_STATUS.notSubscribed);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const [saved, count, callAlerts] = await Promise.all([
+        const [saved, count, readiness] = await Promise.all([
           notificationSettings(),
           pendingDigestCount(),
-          pushAlertsEnabled().catch(() => false),
+          pushReadiness(),
         ]);
         if (!live) return;
         setSettings(saved);
         setDigestCount(count);
-        setCalls(callAlerts);
+        setPushStatus(readiness.status);
+        setCalls(readiness.status === PUSH_STATUS.ready);
       } catch { /* preferences are optional */ }
     })();
     return () => { live = false; };
@@ -276,13 +278,26 @@ function NotificationGroup() {
    */
   const toggleMaster = async (on) => {
     setNotice("");
-    if (!on) { await patch({ enabled: false }); return; }
+    if (!on) {
+      try {
+        const result = await disablePushAlerts();
+        await patch({ enabled: false });
+        setCalls(false);
+        setPushStatus(PUSH_STATUS.notSubscribed);
+        if (result && !result.serverRemoved) setNotice("Background alerts are off on this device. The server will clean up its old registration when it is reachable again.");
+      } catch (error) {
+        setNotice(error.message || "Could not turn off background notifications. Try again.");
+      }
+      return;
+    }
     try {
       const { push } = await enableAllAlerts();
       setSettings(await notificationSettings());
       setCalls(push);
+      const readiness = await pushReadiness();
+      setPushStatus(readiness.status);
       if (!push && pushSupported()) {
-        setNotice("Notifications are on, but this browser will not deliver them while Timber is closed.");
+        setNotice(pushStatusMessage(readiness.status));
       }
     } catch (error) {
       setNotice(error.message || "Notifications are unavailable or were not allowed by this browser.");
@@ -292,8 +307,18 @@ function NotificationGroup() {
   const toggleCalls = async (on) => {
     setNotice("");
     try {
-      if (on) { await enablePushAlerts(); setCalls(true); }
-      else { await disablePushAlerts(); setCalls(false); }
+      if (on) {
+        const { push } = await enableAllAlerts();
+        setSettings(await notificationSettings());
+        setCalls(push);
+        const readiness = await pushReadiness();
+        setPushStatus(readiness.status);
+        if (!push && pushSupported()) setNotice(pushStatusMessage(readiness.status));
+      } else {
+        await disablePushAlerts();
+        setCalls(false);
+        setPushStatus(PUSH_STATUS.notSubscribed);
+      }
     } catch (error) { setNotice(error.message || "Call alerts could not be changed."); }
   };
 
@@ -331,7 +356,7 @@ function NotificationGroup() {
         icon={Icons.phone}
         tint="green"
         title="Alerts when Timber is closed"
-        subtitle={pushSupported() ? "Calls and messages reach you with the app shut" : "Not supported by this browser"}
+        subtitle={pushStatusMessage(pushStatus)}
         control={<SettingsSwitch checked={calls} onChange={toggleCalls} label="Alerts when Timber is closed" disabled={!pushSupported()} />}
       />
       {digestCount > 0 && (

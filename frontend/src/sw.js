@@ -115,6 +115,9 @@ self.addEventListener('push', (event) => {
       callId: data.callId ?? null,
       username: data.username ?? null,
     },
+  }).catch(() => {
+    // A revoked permission or an OS-level notification failure must not leave
+    // the push event rejected; the provider can then continue future delivery.
   }));
 });
 
@@ -131,7 +134,9 @@ self.addEventListener('notificationclick', (event) => {
       return existing.focus();
     }
     return self.clients.openWindow(urlFor(target));
-  })());
+  })().catch(() => {
+    // The window may disappear between matchAll and focus/openWindow.
+  }));
 });
 
 /**

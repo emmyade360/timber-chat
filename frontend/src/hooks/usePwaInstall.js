@@ -8,6 +8,7 @@ export function usePwaInstall() {
   const deferred = useRef(null);
   const [canInstall, setCanInstall] = useState(false);
   const [installed, setInstalled] = useState(() => typeof window !== 'undefined' && standalone());
+  const [justInstalled, setJustInstalled] = useState(false);
 
   useEffect(() => {
     const capture = (event) => {
@@ -15,7 +16,12 @@ export function usePwaInstall() {
       deferred.current = event;
       setCanInstall(true);
     };
-    const complete = () => { deferred.current = null; setCanInstall(false); setInstalled(true); };
+    const complete = () => {
+      deferred.current = null;
+      setCanInstall(false);
+      setInstalled(true);
+      setJustInstalled(true);
+    };
     window.addEventListener('beforeinstallprompt', capture);
     window.addEventListener('appinstalled', complete);
     return () => {
@@ -33,6 +39,8 @@ export function usePwaInstall() {
     return result.outcome === 'accepted';
   }, []);
 
+  const acknowledgeInstalled = useCallback(() => setJustInstalled(false), []);
+
   const isIos = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-  return { canInstall, installed, isIos, promptInstall };
+  return { canInstall, installed, isIos, promptInstall, justInstalled, acknowledgeInstalled };
 }

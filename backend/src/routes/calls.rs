@@ -283,20 +283,35 @@ pub async fn send_message_push(
     conversation_id: Uuid,
     username: &str,
 ) -> bool {
-    let payload = serde_json::json!({
-        "type": "message",
-        "conversationId": conversation_id,
-        "username": username,
-    });
+    let payload = message_push_payload(conversation_id, username);
     send_push(
         state,
         recipient,
         &payload,
         60 * 60 * 12,
         Urgency::Normal,
-        Some(format!("m{}", conversation_id.simple())),
+        // RFC 8030 limits Topic to 32 bytes. Keep a message prefix and use
+        // the first 31 ASCII UUID characters so call and message topics cannot
+        // replace one another.
+        Some(message_push_topic(conversation_id)),
     )
     .await
+}
+
+/// The only message data a push provider may receive. Keep this as a small
+/// pure builder so the privacy boundary is covered by a unit test as well as
+/// by the call site.
+fn message_push_payload(conversation_id: Uuid, username: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "message",
+        "conversationId": conversation_id,
+        "username": username,
+    })
+}
+
+fn message_push_topic(conversation_id: Uuid) -> String {
+    let compact = conversation_id.simple().to_string();
+    format!("m{}", &compact[..31])
 }
 
 /// Fan a payload out to every device this account has registered.
@@ -366,6 +381,24 @@ mod tests {
         assert!(valid_push_subscription(&subscription("https://web.push.apple.com/Q2hhbmdlTWU")));
         assert!(!valid_push_subscription(&subscription("https://127.0.0.1/push")));
         assert!(!valid_push_subscription(&subscription("https://example.com/push")));
+    }
+
+    #[test]
+    fn message_push_payload_contains_sender_and_thread_only() {
+        let conversation = Uuid::new_v4();
+        let payload = message_push_payload(conversation, "ada");
+        assert_eq!(payload["type"], "message");
+        assert_eq!(payload["conversationId"], conversation.to_string());
+        assert_eq!(payload["username"], "ada");
+        assert!(payload.get("body").is_none());
+        assert!(payload.get("plaintext").is_none());
+    }
+
+    #[test]
+    fn message_push_topic_is_bounded_and_conversation_specific() {
+        let topic = message_push_topic(Uuid::new_v4());
+        assert_eq!(topic.len(), 32);
+        assert!(topic.starts_with('m'));
     }
 }
 

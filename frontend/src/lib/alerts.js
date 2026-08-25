@@ -12,7 +12,7 @@
 // single door in.
 
 import { notificationSettings, updateNotificationSettings } from "./notifications.js";
-import { enablePushAlerts, pushAlertsEnabled, pushSupported } from "./push.js";
+import { enablePushAlerts, pushAlertsEnabled, pushReadiness, pushSupported, PUSH_STATUS } from "./push.js";
 
 /** Nothing has been asked yet, so it is still reasonable to offer. */
 export function alertsUndecided() {
@@ -21,6 +21,25 @@ export function alertsUndecided() {
 
 export function alertsBlocked() {
   return typeof Notification !== "undefined" && Notification.permission === "denied";
+}
+
+export function pushStatusMessage(status) {
+  return ({
+    [PUSH_STATUS.unsupported]: "This browser cannot deliver notifications while Timber is closed.",
+    [PUSH_STATUS.missingKey]: "Background notifications are not configured for this deployment yet.",
+    [PUSH_STATUS.denied]: "Notifications are blocked for this site. Allow them in your browser settings, then retry.",
+    [PUSH_STATUS.unavailable]: "The notification service worker is not ready. Keep Timber open briefly, then retry.",
+    [PUSH_STATUS.notSubscribed]: "Permission is granted; this device still needs to register for background alerts.",
+    [PUSH_STATUS.ready]: "Messages and calls can reach this device while Timber is closed.",
+  })[status] ?? "Background notification status is unavailable.";
+}
+
+export async function alertReadiness() {
+  const [settings, push] = await Promise.all([
+    notificationSettings().catch(() => ({ enabled: false })),
+    pushReadiness(),
+  ]);
+  return { enabled: Boolean(settings.enabled), push };
 }
 
 /**
@@ -57,7 +76,11 @@ export async function enableAllAlerts() {
   if (typeof Notification === "undefined") {
     throw new Error("This browser does not support notifications.");
   }
-  const permission = await Notification.requestPermission();
+  // Permission requests must remain tied to the caller's click/tap. Do not
+  // invoke the browser prompt again when it is already granted.
+  const permission = Notification.permission === "granted"
+    ? "granted"
+    : await Notification.requestPermission();
   if (permission !== "granted") {
     throw new Error("Notifications were not allowed by this browser.");
   }
