@@ -3,9 +3,9 @@
 // destinations as the discovery area grows.
 
 export function mobileTabSelection(tab) {
-  if (tab === "vault") return { tab: "vault", vaultPage: "root", closeConversation: true };
-  if (tab === "profile") return { tab: "profile", vaultPage: null, closeConversation: true };
-  return { tab: "chats", vaultPage: null, closeConversation: true };
+  if (tab === "vault") return { tab: "vault", vaultPage: "root", chatsPage: "list", closeConversation: true };
+  if (tab === "profile") return { tab: "profile", vaultPage: null, chatsPage: "list", closeConversation: true };
+  return { tab: "chats", vaultPage: null, chatsPage: "list", closeConversation: true };
 }
 
 export function notificationMobileDestination(kind) {

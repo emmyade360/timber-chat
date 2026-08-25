@@ -138,7 +138,7 @@ export default function People({ onOpenConversation, onBack }) {
     <div className="screen">
       <div className="screen-toolbar">
         <header className="screen-header">
-          {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back to Vault">‹</button>}
+          {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back">‹</button>}
           <h1 className="screen-title">People</h1>
           <div className="people-views" role="group" aria-label="People views">
             <ViewIcon

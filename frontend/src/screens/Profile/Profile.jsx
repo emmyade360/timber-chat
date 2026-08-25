@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
 import { updateCurrentUser, userMessage } from "../../lib/api.js";
 import { Icons } from "../../components/Settings/icons.jsx";
+import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import Modal from "../../components/Modal.jsx";
 
 function ProfileAvatar({ username, url, size = "large" }) {
@@ -43,7 +44,10 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
           <h2>
             {me.username}
           </h2>
-          <p className="profile-secure"><span>◉</span> Secure</p>
+          <p className="profile-stage" title={me.level_name ?? "Growth stage"}>
+            <LevelBadge level={me.level} size={20} name={me.level_name} />
+            <span className="profile-stage-name">{me.level_name}</span>
+          </p>
         </div>
       </section>
 

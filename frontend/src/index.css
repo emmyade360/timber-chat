@@ -1357,6 +1357,43 @@ body {
 .level-chip-name { font-size: 12px; color: var(--text-muted); }
 .level-badge { display: block; flex-shrink: 0; }
 
+@media (prefers-reduced-motion: no-preference) {
+  .level-badge-spark {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: level-spark 2.8s ease-in-out infinite;
+  }
+  .level-badge-sweep { animation: level-sweep 3.8s ease-in-out infinite; }
+}
+
+@keyframes level-spark {
+  0%, 100% { opacity: .3; transform: scale(.65) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1) rotate(45deg); }
+}
+
+@keyframes level-sweep {
+  0% { transform: translateX(0); }
+  55%, 100% { transform: translateX(132px); }
+}
+
+/* The growth stage sits under the username in place of the old Secure pill. */
+.profile-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0 0;
+  padding: 3px 11px 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+.profile-stage-name {
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+  letter-spacing: .02em;
+}
+
 /* ═══════════════════════════════════════════════════════════
    ONBOARDING & UNLOCK
    ═══════════════════════════════════════════════════════════ */
@@ -2199,7 +2236,8 @@ html[data-theme="light"] {
   .profile-reference-hero .profile-avatar { width: 70px; height: 70px; border: 2px solid var(--accent); box-shadow: 0 0 0 3px rgba(255,173,115,.09); font-size: 27px; }
   .profile-avatar-edit { position: absolute; top: 70px; left: calc(50% + 14px); display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid #756967; border-radius: 50%; color: var(--timber-text); background: #37343a; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
   .profile-view-identity h2 { margin: 10px 0 0; color: var(--timber-text); font-size: 19px; }
-  .profile-secure { display: inline-flex; gap: 4px; margin: 6px 0 0; padding: 2px 10px; border: 1px solid rgba(74,213,139,.35); border-radius: 999px; color: #5ad993; background: rgba(41,147,89,.16); font-family: ui-monospace, monospace; font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
+  .profile-stage { gap: 6px; margin: 7px 0 0; padding: 3px 10px 3px 4px; border-color: var(--timber-line); background: #201e22; }
+  .profile-stage-name { color: var(--timber-text); font-size: 11px; }
   .profile-vault-card { width: auto; margin: 0 12px 9px; padding: 9px 11px; background: #201e22; border-color: var(--timber-line); border-radius: 8px; }
   .profile-row-icon { display: grid; width: 24px; height: 24px; place-items: center; color: var(--accent); }
   .profile-secure-card-copy strong { font-size: 12px; }

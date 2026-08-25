@@ -44,6 +44,38 @@ describe("growth-stage diamonds", () => {
     expect(rendered[20]).toContain("feGaussianBlur");
   });
 
+  it("cuts a different stone for every stage rather than reusing a band", () => {
+    // Palettes used to be shared across two or three stages at a time, so
+    // advancing often changed nothing you could see. One stone per stage.
+    const palettes = rendered.map((svg) => (svg.match(/stop-color="[^"]+"/g) ?? []).join("|"));
+    expect(new Set(palettes).size).toBe(21);
+  });
+
+  it("widens the glow as the stones get rarer", () => {
+    const blur = (svg) => Number(svg.match(/stdDeviation="([\d.]+)"/)?.[1] ?? 0);
+    expect(blur(rendered[5])).toBeGreaterThan(0);
+    expect(blur(rendered[5])).toBeLessThan(blur(rendered[12]));
+    expect(blur(rendered[12])).toBeLessThan(blur(rendered[20]));
+  });
+
+  it("saves sparkle, dispersion and shimmer for the top of the ladder", () => {
+    // Stage one has to look like something worth leaving behind, and the last
+    // stage has to look like an arrival. Each effect switches on separately so
+    // the climb keeps giving something new to notice.
+    for (const dull of [rendered[0], rendered[4]]) {
+      expect(dull).not.toContain("level-badge-spark");
+      expect(dull).not.toContain("-prism");
+      expect(dull).not.toContain("level-badge-sweep");
+    }
+    expect(rendered[11]).toContain("level-badge-spark");
+    expect(rendered[16]).toContain("level-badge-sweep");
+    expect(rendered[17]).toContain("-prism");
+
+    const sparks = (svg) => (svg.match(/level-badge-spark/g) ?? []).length;
+    expect(sparks(rendered[11])).toBeLessThan(sparks(rendered[17]));
+    expect(sparks(rendered[17])).toBeLessThan(sparks(rendered[20]));
+  });
+
   it("names the stage rather than numbering it", () => {
     const named = render(12, { name: "Solitaire" });
     expect(named).toContain('aria-label="Solitaire growth stage"');

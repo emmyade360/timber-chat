@@ -126,6 +126,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [vaultPage, setVaultPage] = useState("root");
+  const [chatsPage, setChatsPage] = useState("list");
   const [openConversation, setOpenConversation] = useState(null);
   const [manualInstall, setManualInstall] = useState(false);
   const [incomingNotice, setIncomingNotice] = useState(null);
@@ -180,6 +181,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
       // A call answers itself through resumePendingCalls; showing the thread it
       // belongs to is the useful thing to do either way.
       setTab("chats");
+      setChatsPage("list");
       const known = useChatStore.getState().conversations
         .some((entry) => entry.id === target.conversationId);
       if (!known) await reconcileRealtime().catch(() => {});
@@ -209,6 +211,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   const openIncomingNotice = () => {
     if (!incomingNotice?.conversationId) return;
     setOpenConversation(incomingNotice.conversationId);
+    setChatsPage("list");
     setTab("chats");
     setIncomingNotice(null);
   };
@@ -241,6 +244,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   const openWithFriend = async (friendId, conversationId) => {
     if (conversationId) {
       setOpenConversation(conversationId);
+      setChatsPage("list");
       setTab("chats");
       return;
     }
@@ -248,19 +252,23 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
     const match = conversations.find((entry) => entry.peer.id === friendId);
     if (match) {
       setOpenConversation(match.id);
+      setChatsPage("list");
       setTab("chats");
     }
   };
 
   const listPane = (
     <>
-      {tab === "chats" && (
+      {tab === "chats" && chatsPage === "list" && (
         <Chats
           onOpen={setOpenConversation}
           activeConversationId={isDesktop ? openConversation : null}
-          onFindPeople={() => { setVaultPage("people"); setTab("vault"); }}
-          onInvite={() => { setVaultPage("people"); setTab("vault"); }}
+          onFindPeople={() => setChatsPage("people")}
+          onInvite={() => setChatsPage("people")}
         />
+      )}
+      {tab === "chats" && chatsPage === "people" && (
+        <People onOpenConversation={openWithFriend} onBack={() => setChatsPage("list")} />
       )}
       {tab === "vault" && vaultPage === "root" && (
         <Vault onOpenExplore={() => setVaultPage("explore")} />
@@ -324,6 +332,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
               setSettingsOpen(false);
               setSettingsTarget(null);
               if (selection.vaultPage) setVaultPage(selection.vaultPage);
+              setChatsPage(selection.chatsPage);
               setTab(selection.tab);
             }}
           >
