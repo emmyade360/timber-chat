@@ -12,7 +12,7 @@ vi.mock("../db/localStore.js", () => ({
 }));
 vi.mock("./callTones.js", () => tones);
 
-const { notifyIncoming } = await import("./notifications.js");
+const { notifyIncoming, subscribeIncomingNotification } = await import("./notifications.js");
 
 let shown;
 
@@ -85,6 +85,18 @@ describe("a message arriving while the app is hidden", () => {
 });
 
 describe("a message arriving while the app is on screen", () => {
+  it("announces a privacy-safe in-app popup for another conversation", async () => {
+    browser({ visible: true });
+    const listener = vi.fn();
+    const unsubscribe = subscribeIncomingNotification(listener);
+    await notifyIncoming(arrival());
+    unsubscribe();
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: "c1",
+      body: "New private message from @cedarwood",
+    }));
+  });
+
   it("plays a tone instead of an OS notification", async () => {
     // An OS popup would be redundant when the app is visible, but suppressing
     // it left the arrival with no cue at all.

@@ -8,6 +8,24 @@ const SETTINGS_KEY = "notification-settings";
 const DIGEST_KEY = "notification-digest";
 const CHECK_IN_KEY = "notification-last-check-in";
 const defaults = { enabled: false, digest: false, checkIns: false, chats: {} };
+const incomingListeners = new Set();
+
+/** Subscribe to the small, privacy-safe in-app message banner. */
+export function subscribeIncomingNotification(listener) {
+  incomingListeners.add(listener);
+  return () => incomingListeners.delete(listener);
+}
+
+function announceIncoming({ conversationId, username }) {
+  const entry = {
+    conversationId,
+    username: username || "a contact",
+    body: `New private message from @${username || "a contact"}`,
+  };
+  for (const listener of incomingListeners) {
+    try { listener(entry); } catch { /* a banner must not interrupt message sync */ }
+  }
+}
 
 export async function notificationSettings() {
   return { ...defaults, ...((await getMeta(SETTINGS_KEY)) ?? {}) };
@@ -104,6 +122,7 @@ export async function notifyIncoming({ conversationId, username, message, isActi
   if (settings.chats?.[conversationId] === "muted") return;
 
   if (documentVisible()) {
+    if (settings.enabled) announceIncoming({ conversationId, username });
     playMessageTone();
     return;
   }
@@ -122,6 +141,8 @@ export async function notifyIncoming({ conversationId, username, message, isActi
     // a sound, which reads as "notifications stopped working".
     tag: `timber:${conversationId}`,
     renotify: true,
+    icon: "/icons/timber-192.png",
+    badge: "/icons/timber-192.png",
   });
 }
 

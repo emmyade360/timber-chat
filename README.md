@@ -107,7 +107,8 @@ an operator you trust. Calls are not Timber message envelopes and are not backed
 
 Browser notifications are off by default, generic (never message text), and controlled
 per chat. Quiet mode stores the choice inside the encrypted payload. Optional digest and
-check-in controls are device-local; a web page cannot reliably notify after it is closed.
+check-in controls are device-local. When permission is granted and the deployment has
+matching VAPID keys, Web Push can notify an installed device even while Timber is closed.
 
 The Restore & device-continuity center can emit a QR containing the existing
 PIN-encrypted vault record, never the recovery phrase. A new device still requires that

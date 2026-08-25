@@ -341,6 +341,44 @@ body {
   background: rgba(139, 60, 40, 0.95);
 }
 
+/* Privacy-safe in-app message popup. It is intentionally separate from the
+   unread badge so a new message is visible even when the chat list is scrolled. */
+.incoming-notice {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 62;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: rgba(31, 22, 16, .98);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .42);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  animation: fadeUp .18s ease-out;
+}
+.incoming-notice:hover { background: var(--bg-active); }
+.incoming-notice-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(212, 137, 74, .2);
+  color: var(--accent);
+  font-size: 16px;
+}
+.incoming-notice-copy { display: grid; min-width: 0; gap: 2px; }
+.incoming-notice-copy strong { font-size: 12px; color: var(--accent-light); }
+.incoming-notice-copy span { overflow: hidden; color: var(--text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.incoming-notice-close { margin-left: auto; color: var(--text-muted); font-size: 20px; line-height: 1; }
+
 /* ─── tab bar ─────────────────────────────────────────────── */
 
 /* A milled rail, not a flat strip: a lit top edge and a dark body make the
@@ -2272,6 +2310,12 @@ html[data-theme="light"] {
   .call-btn--accept { margin-left: auto; background: #5ad993; border-color: #5ad993; }
   .call-btn--accept::before { content: "✓"; color: #14271b; }
   .call-toast { bottom: calc(69px + env(safe-area-inset-bottom)); background: var(--timber-card); }
+  .incoming-notice {
+    right: 10px;
+    bottom: calc(69px + env(safe-area-inset-bottom));
+    width: calc(100vw - 20px);
+    background: var(--timber-card);
+  }
 }
 
 @media (min-width: 900px) {

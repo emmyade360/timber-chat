@@ -759,6 +759,10 @@ async fn send_message(
     let stored = StoredMessage::from(row);
     let mut payload = serde_json::to_value(&stored)
         .map_err(|error| ApiError::Internal(error.to_string()))?;
+    // The client may be showing an in-app notification. The sender identity is
+    // safe relationship metadata (never message plaintext) and avoids falling
+    // back to the anonymous "a contact" label while the thread is closed.
+    payload["username"] = Value::String(user.username.clone());
     if let Some(client_id) = input.client_id {
         payload["client_id"] = Value::String(client_id);
     }
@@ -901,17 +905,20 @@ pub async fn deliver_due_scheduled_messages(state: &AppState) -> Result<(), ApiE
     for (sender, peer, conversation_id, client_id, row) in deliveries {
         let mut payload = serde_json::to_value(StoredMessage::from(row))
             .map_err(|error| ApiError::Internal(error.to_string()))?;
+        let sender_name: Option<String> =
+            sqlx::query_scalar("SELECT username FROM profiles WHERE id = $1")
+                .bind(sender)
+                .fetch_optional(&state.db)
+                .await?;
+        if let Some(name) = sender_name.as_ref() {
+            payload["username"] = Value::String(name.clone());
+        }
         if let Some(client_id) = client_id { payload["client_id"] = Value::String(client_id); }
         publish(state, EventTarget::Pair(sender, peer), "message.new", payload);
 
         // A scheduled message lands exactly like any other one, so it has to
         // notify like any other one. Without this a "deliver later" message
         // reached an offline recipient in total silence.
-        let sender_name: Option<String> =
-            sqlx::query_scalar("SELECT username FROM profiles WHERE id = $1")
-                .bind(sender)
-                .fetch_optional(&state.db)
-                .await?;
         if let Some(sender_name) = sender_name {
             notify_offline_recipient(state, peer, conversation_id, &sender_name).await;
         }

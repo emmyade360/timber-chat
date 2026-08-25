@@ -6,7 +6,7 @@
 use std::{env, time::Duration};
 
 use axum::{Json, extract::Extension, extract::State};
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{Engine, engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD}};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -243,8 +243,14 @@ pub fn push_configured() -> bool {
 }
 
 fn vapid_configuration() -> Option<(String, String)> {
-    let private_key = env::var("WEB_PUSH_VAPID_PRIVATE_KEY").ok().filter(|key| !key.trim().is_empty())?;
-    let subject = env::var("WEB_PUSH_VAPID_SUBJECT").ok().filter(|value| value.starts_with("mailto:") || value.starts_with("https://"))?;
+    let private_key = env::var("WEB_PUSH_VAPID_PRIVATE_KEY")
+        .ok()
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty())?;
+    let subject = env::var("WEB_PUSH_VAPID_SUBJECT")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| value.starts_with("mailto:") || value.starts_with("https://"))?;
     Some((private_key, subject))
 }
 
@@ -314,6 +320,51 @@ fn message_push_topic(conversation_id: Uuid) -> String {
     format!("m{}", &compact[..31])
 }
 
+/// Build a VAPID signature from either supported key representation.
+///
+/// The web-push crate's `from_base64` constructor expects the literal 32-byte
+/// private scalar encoded as URL-safe base64. OpenSSL commonly produces a
+/// PKCS#8/SEC1 DER document instead, also base64 encoded. The latter was in the
+/// deployment environment and used to make every notification silently skip its
+/// signature. Accepting both keeps existing deployments working while retaining
+/// the documented raw-key format.
+fn vapid_signature(
+    private_key: &str,
+    subject: &str,
+    info: &SubscriptionInfo,
+) -> Option<web_push::VapidSignature> {
+    let decoded = URL_SAFE_NO_PAD.decode(private_key.as_bytes()).ok()?;
+    // `from_base64` ultimately converts into a fixed-size 32-byte array and
+    // can panic on a DER document, so choose the constructor from the decoded
+    // length before calling it.
+    let mut builder = if decoded.len() == 32 {
+        VapidSignatureBuilder::from_base64(private_key, info).ok()?
+    } else {
+        match VapidSignatureBuilder::from_der(decoded.as_slice(), info) {
+            Ok(builder) => builder,
+            // OpenSSL's default `genpkey` output is PKCS#8. The crate accepts
+            // that representation through its PEM reader, so wrap the same
+            // decoded bytes without ever logging or persisting the key.
+            Err(_) => {
+                let encoded = BASE64.encode(&decoded);
+                let wrapped = encoded
+                    .as_bytes()
+                    .chunks(64)
+                    .map(std::str::from_utf8)
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?
+                    .join("\n");
+                let pem = format!(
+                    "-----BEGIN PRIVATE KEY-----\n{wrapped}\n-----END PRIVATE KEY-----\n",
+                );
+                VapidSignatureBuilder::from_pem(pem.as_bytes(), info).ok()?
+            }
+        }
+    };
+    builder.add_claim("sub", subject);
+    builder.build().ok()
+}
+
 /// Fan a payload out to every device this account has registered.
 ///
 /// Endpoints that the provider reports as dead are deleted as we go, so a
@@ -344,10 +395,7 @@ async fn send_push(
         if let Some(topic) = topic.clone() {
             builder.set_topic(topic);
         }
-        let signature = match VapidSignatureBuilder::from_base64(&private_key, &info) {
-            Ok(mut signature) => { signature.add_claim("sub", subject.as_str()); match signature.build() { Ok(value) => value, Err(_) => continue } }
-            Err(_) => continue,
-        };
+        let Some(signature) = vapid_signature(&private_key, subject.as_str(), &info) else { continue; };
         builder.set_vapid_signature(signature);
         let message = match builder.build() {
             Ok(message) => message,
@@ -399,6 +447,22 @@ mod tests {
         let topic = message_push_topic(Uuid::new_v4());
         assert_eq!(topic.len(), 32);
         assert!(topic.starts_with('m'));
+    }
+
+    #[test]
+    fn vapid_signing_accepts_raw_and_openssl_der_keys() {
+        let info = SubscriptionInfo::new(
+            "https://fcm.googleapis.com/fcm/send/test",
+            "BH1HTeKM7-NwaLGHEqxeu2IamQaVVLkcsFHPIHmsCnqxcBHPQBprF41bEMOr3O1hUQ2jU1opNEm1F_lZV_sxMP8",
+            "sBXU5_tIYz-5w7G2B25BEw",
+        );
+        let raw = "IQ9Ur0ykXoHS9gzfYX0aBjy9lvdrjx_PFUXmie9YRcY";
+        let sec1_der = "MHcCAQEEIMwug_U2ds75hkEIeou9s0kj1ziCJETswt5S9ztJ2L5SoAoGCCqGSM49AwEHoUQDQgAEyjUeooXqyQxljKSu17126pjAEPTyYNApO6dGQl0PexMn0T7LI3qwmU9ZOko2Gn7LYp5LqgA0cX6rfDftsKVvtQ";
+        // Throwaway PKCS#8 fixture; never use a deployment credential in tests.
+        let pkcs8_der = "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgX8Nrn1IS76-2OQuMVgIcZQFqQEvWZbGJ-MLasLNIVxKhRANCAAQ2CCLWIMleF2scv3amCA-ZQPY2ZshkBF3YNwmI48spXtiVMMpHy-KlXF-VytoDiF-bBcV5U8MDBpIpEfzPjSqo";
+        assert!(vapid_signature(raw, "mailto:test@example.com", &info).is_some());
+        assert!(vapid_signature(sec1_der, "mailto:test@example.com", &info).is_some());
+        assert!(vapid_signature(pkcs8_der, "mailto:test@example.com", &info).is_some());
     }
 }
 

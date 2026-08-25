@@ -142,7 +142,11 @@ export function useWebSocket(enabled) {
               if (received) await notifyIncoming({
                 ...received,
                 conversationId: payload.conversation_id,
-                username: payload.username,
+                // Newer relays include the sender name on the event. The
+                // conversation cache is a safe fallback while an older shell
+                // or rolling deployment is still in use.
+                username: payload.username
+                  ?? store.conversations.find((entry) => entry.id === payload.conversation_id)?.peer?.username,
               });
             }
             break;

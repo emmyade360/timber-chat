@@ -12,6 +12,7 @@ import { useCalmCheckIns } from "./hooks/useCalmCheckIns.js";
 import { bootstrap, reconcileRealtime } from "./lib/sync.js";
 import { consumePendingTarget, subscribePendingTarget } from "./lib/deepLink.js";
 import { disablePushAlerts, ensurePushSubscription } from "./lib/push.js";
+import { subscribeIncomingNotification } from "./lib/notifications.js";
 import { useChatStore } from "./store/chatStore.js";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import { useCall } from "./hooks/useCall.js";
@@ -127,12 +128,26 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   const [vaultPage, setVaultPage] = useState("root");
   const [openConversation, setOpenConversation] = useState(null);
   const [manualInstall, setManualInstall] = useState(false);
+  const [incomingNotice, setIncomingNotice] = useState(null);
   const isDesktop = useIsDesktop();
   const { unread, pendingReceived, me, levelUp, dismissLevelUp } = useChatStore();
   const { send, connected, acknowledge, subscribe } = useWebSocket(true);
   const callController = useCall(send, subscribe);
   const { resumePendingCalls } = callController;
   useCalmCheckIns(true);
+
+  // A visible app gets a compact in-app banner as well as the existing tone.
+  // It deliberately carries only the sender and conversation id, never
+  // decrypted message text, and clicking it opens the existing chat route.
+  useEffect(() => subscribeIncomingNotification((entry) => {
+    if (entry?.conversationId) setIncomingNotice(entry);
+  }), []);
+
+  useEffect(() => {
+    if (!incomingNotice) return undefined;
+    const timer = setTimeout(() => setIncomingNotice(null), 7_000);
+    return () => clearTimeout(timer);
+  }, [incomingNotice]);
 
   useEffect(() => {
     bootstrap()
@@ -190,6 +205,24 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
     pwa.acknowledgeInstalled?.();
     onInstallHandled();
   };
+
+  const openIncomingNotice = () => {
+    if (!incomingNotice?.conversationId) return;
+    setOpenConversation(incomingNotice.conversationId);
+    setTab("chats");
+    setIncomingNotice(null);
+  };
+
+  const incomingBanner = incomingNotice ? (
+    <button className="incoming-notice" type="button" onClick={openIncomingNotice} aria-label="Open new private message">
+      <span className="incoming-notice-mark" aria-hidden="true">✦</span>
+      <span className="incoming-notice-copy">
+        <strong>Timber</strong>
+        <span>{incomingNotice.body}</span>
+      </span>
+      <span className="incoming-notice-close" aria-hidden="true">×</span>
+    </button>
+  ) : null;
 
   const levelUpModal = levelUp ? (
     <div className="levelup-backdrop" onClick={dismissLevelUp}>
@@ -311,6 +344,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
         <div className="app-shell">
           {!connected && <div className="offline-bar">Reconnecting…</div>}
           {conversation}
+          {incomingBanner}
           {nav}
           <CallOverlay {...callController} />
         </div>
@@ -320,6 +354,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
       <div className="app-shell">
         {!connected && <div className="offline-bar">Reconnecting…</div>}
         <main className="shell-main">{listPane}</main>
+        {incomingBanner}
         {nav}
         {levelUpModal}
         <CallOverlay {...callController} />
@@ -347,6 +382,8 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
           )}
         </div>
       </main>
+
+      {incomingBanner}
 
       {levelUpModal}
       <CallOverlay {...callController} />
