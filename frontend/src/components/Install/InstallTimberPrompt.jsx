@@ -1,42 +1,130 @@
+// "Stay reachable": the one moment Timber asks to be able to reach someone.
+//
+// Two offers, because they answer the same question — will a call or a message
+// find you when Timber is not open? Notifications are the part that actually
+// matters and are shown first; installing makes them more reliable on phones
+// but is not required for them to work.
+//
+// Either offer alone is reason enough to show this, so someone who installed
+// months ago is still asked about notifications, and someone who cannot install
+// is not shown a dead end.
+
 import { useEffect, useState } from 'react';
 import { getMeta, setMeta } from '../../db/localStore.js';
+import { alertsBlocked, alertsFullyEnabled, enableAllAlerts } from '../../lib/alerts.js';
 
 const INSTALL_KEY = 'pwa-install-prompt';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 export default function InstallTimberPrompt({ open, manual = false, pwa, onClose }) {
   const [eligible, setEligible] = useState(false);
+  const [alertsOn, setAlertsOn] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let active = true;
-    if (!open || pwa.installed) return undefined;
+    if (!open) return undefined;
     (async () => {
-      const choice = await getMeta(INSTALL_KEY);
+      const [choice, enabled] = await Promise.all([
+        getMeta(INSTALL_KEY).catch(() => null),
+        alertsFullyEnabled().catch(() => false),
+      ]);
       if (!active) return;
-      const hidden = !manual && (choice?.never || (choice?.remindAt ?? 0) > Date.now());
-      setEligible(!hidden);
-      if (hidden) onClose();
-    })().catch(() => { if (active) setEligible(true); });
+      setAlertsOn(enabled);
+      // Nothing left to offer: alerts are on and the app is installed or cannot be.
+      const nothingToOffer = enabled && (pwa.installed || (!pwa.canInstall && !pwa.isIos));
+      const snoozed = !manual && (choice?.never || (choice?.remindAt ?? 0) > Date.now());
+      const show = !nothingToOffer && !snoozed;
+      setEligible(show);
+      if (!show) onClose();
+    })();
     return () => { active = false; };
-  }, [manual, onClose, open, pwa.installed]);
+  }, [manual, onClose, open, pwa.canInstall, pwa.installed, pwa.isIos]);
 
-  if (!open || pwa.installed || !eligible) return null;
+  if (!open || !eligible) return null;
+
   const close = () => onClose();
-  const remind = async () => { await setMeta(INSTALL_KEY, { remindAt: Date.now() + WEEK_MS }); close(); };
-  const never = async () => { await setMeta(INSTALL_KEY, { never: true }); close(); };
+  const remind = async () => { await setMeta(INSTALL_KEY, { remindAt: Date.now() + WEEK_MS }).catch(() => {}); close(); };
+  const never = async () => { await setMeta(INSTALL_KEY, { never: true }).catch(() => {}); close(); };
+
+  const turnOnAlerts = async () => {
+    setBusy(true);
+    setNotice('');
+    try {
+      const { push } = await enableAllAlerts();
+      setAlertsOn(true);
+      setNotice(push
+        ? 'Calls and messages will reach this device even when Timber is closed.'
+        : 'Notifications are on. This browser cannot deliver them while Timber is fully closed.');
+    } catch (error) {
+      setNotice(error.message || 'Notifications were not allowed by this browser.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const install = async () => {
     if (pwa.canInstall) await pwa.promptInstall();
     else if (!pwa.isIos) await remind();
   };
 
-  return <div className="modal-backdrop" role="presentation"><section className="modal glass-panel install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
-    <h2 className="modal-title" id="install-title">Install Timber</h2>
-    <p className="panel-note">Add Timber to your home screen for a calmer, full-screen private chat experience and optional incoming-call alerts.</p>
-    {pwa.isIos && !pwa.canInstall && <p className="onboard-warning">In Safari, tap Share, then choose <strong>Add to Home Screen</strong>.</p>}
-    {pwa.canInstall && <button className="btn-wood btn-block" onClick={install}>Install app</button>}
-    {!pwa.canInstall && !pwa.isIos && <p className="panel-note">Your browser does not offer installation yet. You can keep using Timber securely in this tab.</p>}
-    <button className="btn-ghost btn-block" onClick={remind}>Remind me later</button>
-    <button className="btn-ghost btn-block" onClick={never}>Never remind me</button>
-    {manual && <button className="btn-ghost btn-block" onClick={close}>Done</button>}
-  </section></div>;
+  const showInstall = !pwa.installed && (pwa.canInstall || pwa.isIos);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal glass-panel install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
+        <h2 className="modal-title" id="install-title">Stay reachable</h2>
+
+        {!alertsOn ? (
+          <>
+            <p className="panel-note">
+              Let Timber tell you about calls and messages when the app is closed. It
+              never includes what anyone said — only who it is from.
+            </p>
+            {alertsBlocked() ? (
+              <p className="onboard-warning">
+                Notifications are blocked for this site. Turn them back on in your
+                browser’s site settings, then try again.
+              </p>
+            ) : (
+              <button className="btn-wood btn-block" disabled={busy} onClick={turnOnAlerts}>
+                {busy ? 'Asking…' : 'Turn on notifications'}
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="field-ok">Notifications are on for this device.</p>
+        )}
+
+        {showInstall && (
+          <>
+            <p className="panel-note">
+              Installing Timber makes those alerts more reliable on a phone, and gives
+              you a full-screen app instead of a browser tab.
+            </p>
+            {pwa.isIos && !pwa.canInstall && (
+              <p className="onboard-warning">
+                In Safari, tap Share, then choose <strong>Add to Home Screen</strong>.
+              </p>
+            )}
+            {pwa.canInstall && (
+              <button className="btn-ghost btn-block" onClick={install}>Install app</button>
+            )}
+          </>
+        )}
+
+        {notice && <p className="field-ok">{notice}</p>}
+
+        {manual
+          ? <button className="btn-ghost btn-block" onClick={close}>Done</button>
+          : (
+            <>
+              <button className="btn-ghost btn-block" onClick={remind}>Remind me later</button>
+              <button className="btn-ghost btn-block" onClick={never}>Never remind me</button>
+            </>
+          )}
+      </section>
+    </div>
+  );
 }

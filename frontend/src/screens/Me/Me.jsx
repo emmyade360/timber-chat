@@ -19,10 +19,10 @@ import {
   clearDigest,
   notificationSettings,
   pendingDigestCount,
-  requestNotificationPermission,
   updateNotificationSettings,
 } from "../../lib/notifications.js";
 import { disablePushAlerts, enablePushAlerts, pushAlertsEnabled, pushSupported } from "../../lib/push.js";
+import { enableAllAlerts } from "../../lib/alerts.js";
 import { getHealth } from "../../lib/api.js";
 import Modal from "../../components/Modal.jsx";
 
@@ -263,11 +263,27 @@ function NotificationGroup() {
 
   const patch = async (next) => setSettings(await updateNotificationSettings(next));
 
+  /**
+   * The master switch grants both mechanisms at once.
+   *
+   * One browser permission covers the in-page notification raised while the tab
+   * is hidden and the push that arrives when Timber is closed, and they cover
+   * different moments. Turning on only the first left people unreachable in
+   * exactly the case they cared about.
+   */
   const toggleMaster = async (on) => {
     setNotice("");
     if (!on) { await patch({ enabled: false }); return; }
-    try { setSettings(await requestNotificationPermission()); }
-    catch { setNotice("Notifications are unavailable or were not allowed by this browser."); }
+    try {
+      const { push } = await enableAllAlerts();
+      setSettings(await notificationSettings());
+      setCalls(push);
+      if (!push && pushSupported()) {
+        setNotice("Notifications are on, but this browser will not deliver them while Timber is closed.");
+      }
+    } catch (error) {
+      setNotice(error.message || "Notifications are unavailable or were not allowed by this browser.");
+    }
   };
 
   const toggleCalls = async (on) => {
@@ -479,6 +495,11 @@ function WipeDevice({ onClose, onWiped }) {
         className="btn-danger btn-block"
         disabled={confirmation !== "REMOVE"}
         onClick={async () => {
+          // Before the local database goes, hand back the push subscription.
+          // Otherwise this device keeps buzzing with "message from @someone" for
+          // an account it no longer holds, and the person removing it has no way
+          // left to stop it.
+          await disablePushAlerts().catch(() => {});
           await wipeDevice();
           onWiped("");
         }}

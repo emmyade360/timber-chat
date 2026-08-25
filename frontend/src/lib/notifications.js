@@ -24,12 +24,6 @@ export async function setChatNotification(conversationId, mode) {
   return updateNotificationSettings({ chats });
 }
 
-export async function requestNotificationPermission() {
-  if (!("Notification" in window)) throw new Error("This browser does not support notifications.");
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") throw new Error("Notifications were not allowed by this browser.");
-  return updateNotificationSettings({ enabled: true });
-}
 
 /**
  * Whether an OS-level popup is warranted right now.
