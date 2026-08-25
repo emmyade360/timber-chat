@@ -84,19 +84,26 @@ export function userIdForPublicKey(identityPk) {
   return bytesToUuidV8(sha256(identityPk));
 }
 
-/**
- * Derive the full key material for a phrase.
- *
- * The returned object holds live secret keys; keep it in memory only. Callers that
- * persist anything must go through vault.js (phrase) or localStore.js (messages).
- */
-export function deriveIdentity(mnemonic) {
+/** The 64-byte BIP39 seed for a phrase, which every key below descends from. */
+export function mnemonicSeed(mnemonic) {
   const phrase = normalizeMnemonic(mnemonic);
   if (!validateMnemonic(phrase, wordlist)) {
     throw new Error("That recovery phrase is not valid.");
   }
+  return mnemonicToSeedSync(phrase);
+}
 
-  const seed = mnemonicToSeedSync(phrase);
+/**
+ * Derive the full key material from a seed.
+ *
+ * The returned object holds live secret keys; keep it in memory only. Callers that
+ * persist anything must go through vault.js (phrase) or localStore.js (messages).
+ *
+ * Resuming a session across a reload re-enters the derivation here, from a sealed
+ * copy of the seed, so the recovery phrase itself is never stored anywhere but the
+ * PIN-sealed vault.
+ */
+export function identityFromSeed(seed) {
   const identitySk = derive(seed, DOMAIN_IDENTITY);
   const kexSk = derive(seed, DOMAIN_KEX);
   const localDbKey = derive(seed, DOMAIN_LOCAL_DB);
@@ -112,6 +119,11 @@ export function deriveIdentity(mnemonic) {
     kexPk,
     localDbKey,
   };
+}
+
+/** Derive the full key material for a phrase. */
+export function deriveIdentity(mnemonic) {
+  return identityFromSeed(mnemonicSeed(mnemonic));
 }
 
 /** Public half of an identity, in the shape the register/login endpoints expect. */

@@ -23,7 +23,7 @@ import {
 } from "../../lib/notifications.js";
 import { disablePushAlerts, pushReadiness, pushSupported, PUSH_STATUS } from "../../lib/push.js";
 import { enableAllAlerts, pushStatusMessage } from "../../lib/alerts.js";
-import { LOCK_POLICIES, lockPolicyLabel, normalizeLockPolicy } from "../../lib/lockPolicy.js";
+import { LOCK_POLICIES, lockPolicyDescription, normalizeLockPolicy } from "../../lib/lockPolicy.js";
 import { getHealth } from "../../lib/api.js";
 import Modal from "../../components/Modal.jsx";
 
@@ -110,7 +110,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
 
       <SettingsGroup
         title="Account & security"
-        footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it. If you do not choose a policy, Timber automatically locks after two hours."
+        footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it. Auto-lock defaults to two hours; turning it off keeps this device signed in until you lock it yourself, so only do that on a device only you use."
       >
         <SettingsRow icon={Icons.key} tint="amber" title="Recovery phrase" subtitle="Twelve words that are your account" onClick={() => setPanel("phrase")} />
         <SettingsRow icon={Icons.pin} tint="wood" title="Change PIN" subtitle={`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`} onClick={() => setPanel("pin")} />
@@ -118,7 +118,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
           icon={Icons.lock}
           tint="wood"
           title="Auto-lock"
-          subtitle={`${lockPolicyLabel(lockPolicy)} — a full reload still requires your PIN`}
+          subtitle={lockPolicyDescription(lockPolicy)}
           control={(
             <select
               className="settings-select"
@@ -126,7 +126,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
               value={normalizeLockPolicy(lockPolicy)}
               onChange={(event) => onLockPolicyChange?.(event.target.value)}
             >
-              <option value={LOCK_POLICIES.always}>Every login</option>
+              <option value={LOCK_POLICIES.always}>Every launch</option>
               <option value={LOCK_POLICIES.twoHours}>After 2 hours</option>
               <option value={LOCK_POLICIES.never}>Never automatically</option>
             </select>

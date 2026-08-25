@@ -1,13 +1,16 @@
 import { useCallback, useState } from "react";
-import { readLockPolicy, writeLockPolicy } from "../lib/lockPolicy.js";
+import { readLockPolicy } from "../lib/lockPolicy.js";
+import { applyLockPolicy } from "../lib/lockSession.js";
 
 /** Keep the auto-lock choice live in the shell and persisted across launches. */
 export function useLockPolicy() {
   const [policy, setPolicy] = useState(() => readLockPolicy());
   const updatePolicy = useCallback((next) => {
-    const saved = writeLockPolicy(next);
-    setPolicy(saved);
-    return saved;
+    // Painted immediately; the resume token behind it is re-sealed or dropped
+    // in the background, so the setting cannot show one thing and mean another.
+    setPolicy(next);
+    applyLockPolicy(next).then(setPolicy).catch(() => {});
+    return next;
   }, []);
   return [policy, updatePolicy];
 }

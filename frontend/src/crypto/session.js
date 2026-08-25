@@ -5,22 +5,53 @@
 // Locking wipes the key bytes in place, so anything still holding a reference
 // sees zeroes rather than usable key material.
 
-import { deriveIdentity } from "./identity.js";
+import { identityFromSeed, mnemonicSeed } from "./identity.js";
 import { forgetConversationKeys } from "./envelope.js";
 
 let identity = null;
+// The seed is kept beside the keys it produced, for two reasons: re-sealing the
+// resume token when the auto-lock policy changes mid-session, and replaying the
+// derivation after a reload. It is no more sensitive than the keys already here,
+// and it is wiped by the same closeSession that wipes them.
+let seed = null;
+let openedAt = 0;
 const listeners = new Set();
 
 function notify() {
   for (const listener of listeners) listener(identity !== null);
 }
 
-/** Derive and hold the identity for an unlocked phrase. */
-export function openSession(mnemonic) {
+function adopt(nextSeed, startedAt) {
   closeSession();
-  identity = deriveIdentity(mnemonic);
+  seed = nextSeed;
+  identity = identityFromSeed(seed);
+  openedAt = startedAt;
   notify();
   return identity;
+}
+
+/** Derive and hold the identity for an unlocked phrase. */
+export function openSession(mnemonic, startedAt = Date.now()) {
+  return adopt(mnemonicSeed(mnemonic), startedAt);
+}
+
+/**
+ * Re-open a session from a sealed seed, keeping the moment the PIN was actually
+ * entered. Reusing the original timestamp is what stops a reload from silently
+ * renewing a two-hour lease.
+ */
+export function reopenSession(nextSeed, startedAt) {
+  return adopt(nextSeed, startedAt);
+}
+
+/** The seed behind the open session. Only the resume seal should ask for this. */
+export function currentSeed() {
+  return seed;
+}
+
+/** When the PIN was entered for the session now open, or 0 while locked. */
+export function sessionOpenedAt() {
+  return identity ? openedAt : 0;
 }
 
 /** The unlocked identity, or null when locked. */
@@ -46,6 +77,9 @@ export function closeSession() {
     identity.localDbKey.fill(0);
     identity = null;
   }
+  seed?.fill(0);
+  seed = null;
+  openedAt = 0;
   forgetConversationKeys();
   notify();
 }

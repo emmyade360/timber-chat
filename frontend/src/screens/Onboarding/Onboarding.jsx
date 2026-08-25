@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createMnemonic, deriveIdentity, isValidMnemonic, normalizeMnemonic, unknownWords } from "../../crypto/identity.js";
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, createVault, importVaultTransfer, isValidPin, unlockVault } from "../../crypto/vault.js";
-import { openSession } from "../../crypto/session.js";
+import { beginSession } from "../../lib/lockSession.js";
 import { hasAccount, register, signIn } from "../../lib/auth.js";
 import { inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
@@ -55,7 +55,7 @@ export default function Onboarding({ onReady }) {
       // The vault is written only after the server round trip succeeds, so a
       // failed signup cannot leave a half-created account locked on the device.
       await createVault(mnemonic, pin);
-      openSession(mnemonic);
+      await beginSession(mnemonic);
       onReady({ newAccount: isNewAccount });
     } catch (caught) {
       setError(caught.message);
@@ -137,7 +137,7 @@ export default function Onboarding({ onReady }) {
                 const phrase = await unlockVault(pin);
                 const identity = deriveIdentity(phrase);
                 await signIn(identity);
-                openSession(phrase);
+                await beginSession(phrase);
                 onReady({ newAccount: false });
               } catch (caught) {
                 setError(caught.message);

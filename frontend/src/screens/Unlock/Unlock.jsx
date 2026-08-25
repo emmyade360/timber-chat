@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { MAX_ATTEMPTS, VaultWipedError, attemptsRemaining, unlockVault, wipeDevice } from "../../crypto/vault.js";
-import { openSession } from "../../crypto/session.js";
+import { beginSession } from "../../lib/lockSession.js";
 import { deriveIdentity } from "../../crypto/identity.js";
 import { signIn } from "../../lib/auth.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
@@ -24,7 +24,7 @@ export default function Unlock({ onUnlocked, onWiped }) {
       const mnemonic = await unlockVault(pin);
       const identity = deriveIdentity(mnemonic);
       await signIn(identity);
-      openSession(mnemonic);
+      await beginSession(mnemonic);
       onUnlocked();
     } catch (caught) {
       if (caught instanceof VaultWipedError) {

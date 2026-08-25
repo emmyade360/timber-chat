@@ -3,7 +3,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { vaultExists } from "./crypto/vault.js";
-import { closeSession, isUnlocked } from "./crypto/session.js";
+import { closeSession, isUnlocked, sessionOpenedAt } from "./crypto/session.js";
+import { endSession, restoreSession } from "./lib/lockSession.js";
 import { clearToken, getToken, logout, runtimeConfigurationError } from "./lib/api.js";
 import { useAutoLock } from "./hooks/useAutoLock.js";
 import { useLockPolicy } from "./hooks/useLockPolicy.js";
@@ -40,20 +41,35 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [configurationError] = useState(() => runtimeConfigurationError());
   const [newAccountInstall, setNewAccountInstall] = useState(false);
+  const [openedAt, setOpenedAt] = useState(() => sessionOpenedAt());
   const pwa = usePwaInstall();
   const [theme, setTheme] = useTheme();
   const [lockPolicy, setLockPolicy] = useLockPolicy();
 
   useEffect(() => {
-    vaultExists().then((exists) => {
-      if (isUnlocked()) setPhase("ready");
-      else setPhase(exists ? "locked" : "onboarding");
-    });
+    let live = true;
+    const boot = async () => {
+      if (isUnlocked()) return "ready";
+      if (!await vaultExists()) return "onboarding";
+      // A reload is the case the setting exists for. "Every launch" never
+      // resumes, "never" always does, and two hours resumes what is left of the
+      // lease from the original unlock.
+      return await restoreSession() ? "ready" : "locked";
+    };
+    boot()
+      .catch(() => "locked")
+      .then((next) => {
+        if (!live) return;
+        setOpenedAt(sessionOpenedAt());
+        setPhase(next);
+      });
+    return () => { live = false; };
   }, []);
 
   const enter = useCallback((options = {}) => {
     setNotice("");
     setNewAccountInstall(Boolean(options.newAccount));
+    setOpenedAt(sessionOpenedAt());
     setPhase("ready");
   }, []);
 
@@ -71,20 +87,24 @@ export default function App() {
     revokeAndClearToken();
     useChatStore.getState().reset();
     setNotice(message);
+    setOpenedAt(0);
     setPhase("onboarding");
   }, [revokeAndClearToken]);
 
   const lock = useCallback(() => {
-    closeSession();
+    // Locking drops the resume token as well as the live keys, so the next load
+    // asks for the PIN whatever the auto-lock policy says.
+    endSession().catch(() => {});
     revokeAndClearToken();
     useChatStore.getState().reset();
+    setOpenedAt(0);
     setPhase("locked");
   }, [revokeAndClearToken]);
 
   // Never lock mid-call: the 30s hidden timer would otherwise fire the moment
   // someone backgrounds the app to answer, wiping the keys the call needs.
   const callActive = useChatStore((state) => state.callActive);
-  useAutoLock(phase === "ready" && !callActive, lock, lockPolicy);
+  useAutoLock(phase === "ready" && !callActive, lock, lockPolicy, openedAt);
 
   if (configurationError) {
     return <main className="fatal-error" role="alert"><h1>Timber is unavailable</h1><p>{configurationError}</p></main>;
