@@ -2,11 +2,9 @@
 // keeps discovery out of the chat tab while preserving the app's direct,
 // accepted-friend model.
 
-import { useChatStore } from "../../store/chatStore.js";
 import { Icons } from "../../components/Settings/icons.jsx";
 
-export default function Vault({ onOpenPeople, onOpenExplore }) {
-  const { pendingReceived, friends } = useChatStore();
+export default function Vault({ onOpenExplore }) {
   return (
     <div className="screen vault-screen">
       <header className="timber-header">
@@ -18,15 +16,10 @@ export default function Vault({ onOpenPeople, onOpenExplore }) {
       <section className="vault-intro">
         <p className="vault-eyebrow">PRIVATE CONNECTIONS</p>
         <h2>People you choose.</h2>
-        <p>Find friends by username or opt into a small, mutual discovery deck. Nobody can message you without consent.</p>
+        <p>Opt into a small, mutual discovery deck. Nobody can message you without consent; use Chats to connect directly by username.</p>
       </section>
 
       <div className="vault-actions">
-        <button className="vault-action" onClick={onOpenPeople}>
-          <span className="vault-action-icon">{Icons.people}</span>
-          <span><strong>People</strong><small>{friends.length} trusted {friends.length === 1 ? "connection" : "connections"}{pendingReceived.length ? ` · ${pendingReceived.length} waiting` : ""}</small></span>
-          <span className="vault-chevron">›</span>
-        </button>
         <button className="vault-action" onClick={onOpenExplore}>
           <span className="vault-action-icon">{Icons.explore}</span>
           <span><strong>Explore</strong><small>Private, mutual discovery</small></span>

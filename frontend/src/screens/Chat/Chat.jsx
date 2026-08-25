@@ -347,13 +347,14 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
           {onBack && <button className="icon-btn" onClick={onBack} aria-label="Back">{Icons.back}</button>}
           <span className={`avatar avatar--sm ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`}>{conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}</span>
           <div className="chat-header-text"><span className="chat-header-name">
-              {conversation?.peerUsername}
+              {conversation?.peerUsername ?? "Private contact"}
               {conversation?.peerLevel && (
                 <LevelBadge level={conversation.peerLevel} size={15} name={conversation.peerLevelName} className="name-gem" />
               )}
-            </span><span className="chat-header-sub"><span className="chat-e2e-label">▣ E2E encrypted</span>{peerTyping && " · typing…"}</span></div>
+            </span><span className="chat-header-sub">{peerTyping && "typing…"}</span></div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
+          <span className="chat-header-security" aria-label="End-to-end encrypted">▣ E2E encrypted</span>
           <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>
           <div className="chat-header-extra">
             <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">{Icons.callVideo}</button>
@@ -364,6 +365,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
           </div>
           <button className="chat-header-action chat-header-overflow" onClick={() => setActionsOpen((open) => !open)} aria-expanded={actionsOpen} aria-label="More conversation actions">⋮</button>
           {actionsOpen && <div className="chat-action-sheet">
+            <button disabled={!secure || call?.phase !== "idle"} onClick={() => { setActionsOpen(false); startCall("audio"); }}>{Icons.callAudio}<span>Voice call</span></button>
             <button disabled={!secure || call?.phase !== "idle"} onClick={() => { setActionsOpen(false); startCall("video"); }}>{Icons.callVideo}<span>Video call</span></button>
             <button onClick={() => { setActionsOpen(false); showSaved(); }}>{Icons.star}<span>Saved messages</span></button>
             <button onClick={() => { setActionsOpen(false); toggleChatNotifications(); }}>{notificationsMuted ? Icons.bellOff : Icons.bell}<span>{notificationsMuted ? "Unmute alerts" : "Mute alerts"}</span></button>

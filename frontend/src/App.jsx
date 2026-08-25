@@ -6,6 +6,7 @@ import { vaultExists } from "./crypto/vault.js";
 import { closeSession, isUnlocked } from "./crypto/session.js";
 import { clearToken, getToken, logout, runtimeConfigurationError } from "./lib/api.js";
 import { useAutoLock } from "./hooks/useAutoLock.js";
+import { useLockPolicy } from "./hooks/useLockPolicy.js";
 import { useIsDesktop } from "./hooks/useIsDesktop.js";
 import { useCalmCheckIns } from "./hooks/useCalmCheckIns.js";
 import { bootstrap, reconcileRealtime } from "./lib/sync.js";
@@ -40,6 +41,7 @@ export default function App() {
   const [newAccountInstall, setNewAccountInstall] = useState(false);
   const pwa = usePwaInstall();
   const [theme, setTheme] = useTheme();
+  const [lockPolicy, setLockPolicy] = useLockPolicy();
 
   useEffect(() => {
     vaultExists().then((exists) => {
@@ -81,7 +83,7 @@ export default function App() {
   // Never lock mid-call: the 30s hidden timer would otherwise fire the moment
   // someone backgrounds the app to answer, wiping the keys the call needs.
   const callActive = useChatStore((state) => state.callActive);
-  useAutoLock(phase === "ready" && !callActive, lock);
+  useAutoLock(phase === "ready" && !callActive, lock, lockPolicy);
 
   if (configurationError) {
     return <main className="fatal-error" role="alert"><h1>Timber is unavailable</h1><p>{configurationError}</p></main>;
@@ -107,7 +109,7 @@ export default function App() {
 
   if (phase === "locked") return <Unlock onUnlocked={enter} onWiped={wiped} />;
 
-  return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} theme={theme} onThemeChange={setTheme} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
+  return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} theme={theme} onThemeChange={setTheme} lockPolicy={lockPolicy} onLockPolicyChange={setLockPolicy} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
 }
 
 // The reference mobile shell is deliberately compact: chats, private
@@ -118,7 +120,7 @@ const TABS = [
   { id: "profile", label: "Profile", icon: Icons.profile },
 ];
 
-function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstall, onInstallHandled }) {
+function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLockPolicyChange, newAccountInstall, onInstallHandled }) {
   const [tab, setTab] = useState("chats");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState(null);
@@ -228,7 +230,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstal
         />
       )}
       {tab === "vault" && vaultPage === "root" && (
-        <Vault onOpenPeople={() => setVaultPage("people")} onOpenExplore={() => setVaultPage("explore")} />
+        <Vault onOpenExplore={() => setVaultPage("explore")} />
       )}
       {tab === "vault" && vaultPage === "people" && (
         <People onOpenConversation={openWithFriend} onBack={() => setVaultPage("root")} />
@@ -242,6 +244,8 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstal
           onOpenVault={(destination = "root") => { setVaultPage(destination); setTab("vault"); }}
           theme={theme}
           onThemeChange={onThemeChange}
+          lockPolicy={lockPolicy}
+          onLockPolicyChange={onLockPolicyChange}
         />
       )}
       {tab === "profile" && settingsOpen && (

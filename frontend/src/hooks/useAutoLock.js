@@ -3,11 +3,13 @@
 // own derived keys when one of them is explicitly locked.
 
 import { useEffect, useRef } from "react";
+import { LOCK_POLICIES, normalizeLockPolicy } from "../lib/lockPolicy.js";
 
 export const IDLE_LOCK_MS = 5 * 60 * 1000;
 export const HIDDEN_LOCK_MS = 30 * 1000;
+export const SESSION_LOCK_MS = 2 * 60 * 60 * 1000;
 
-export function useAutoLock(enabled, onLock) {
+export function useAutoLock(enabled, onLock, policy = LOCK_POLICIES.always) {
   const lockRef = useRef(onLock);
 
   useEffect(() => {
@@ -16,8 +18,10 @@ export function useAutoLock(enabled, onLock) {
 
   useEffect(() => {
     if (!enabled) return undefined;
+    const selected = normalizeLockPolicy(policy);
     let idleTimer;
     let hiddenTimer;
+    let sessionTimer;
     const channel = typeof BroadcastChannel === "undefined"
       ? null
       : new BroadcastChannel("timber-lock");
@@ -25,9 +29,32 @@ export function useAutoLock(enabled, onLock) {
     const lock = (announce) => {
       clearTimeout(idleTimer);
       clearTimeout(hiddenTimer);
+      clearTimeout(sessionTimer);
       if (announce) channel?.postMessage({ type: "lock" });
       lockRef.current();
     };
+
+    channel?.addEventListener("message", (event) => {
+      if (event.data?.type === "lock") lock(false);
+    });
+
+    // "Never" disables only automatic locking. An explicit Lock Timber action
+    // and a lock from another open tab still wipe this session immediately.
+    if (selected === LOCK_POLICIES.never) {
+      return () => channel?.close();
+    }
+
+    // The two-hour choice is a session lease, rather than an idle timer: using
+    // Timber during the window does not silently extend the promise made by
+    // the setting. A hidden tab receives the same two-hour treatment.
+    if (selected === LOCK_POLICIES.twoHours) {
+      sessionTimer = setTimeout(() => lock(true), SESSION_LOCK_MS);
+      return () => {
+        clearTimeout(sessionTimer);
+        channel?.close();
+      };
+    }
+
     const resetIdle = () => {
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => lock(true), IDLE_LOCK_MS);
@@ -44,17 +71,15 @@ export function useAutoLock(enabled, onLock) {
     const events = ["pointerdown", "keydown", "touchstart"];
     for (const event of events) window.addEventListener(event, activity, { passive: true });
     document.addEventListener("visibilitychange", visibility);
-    channel?.addEventListener("message", (event) => {
-      if (event.data?.type === "lock") lock(false);
-    });
     resetIdle();
 
     return () => {
       clearTimeout(idleTimer);
       clearTimeout(hiddenTimer);
+      clearTimeout(sessionTimer);
       for (const event of events) window.removeEventListener(event, activity);
       document.removeEventListener("visibilitychange", visibility);
       channel?.close();
     };
-  }, [enabled]);
+  }, [enabled, policy]);
 }

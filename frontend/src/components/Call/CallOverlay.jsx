@@ -53,7 +53,7 @@ export default function CallOverlay({ call, acceptCall, endCall, toggleMuted, to
         </div>
         <p className="call-status">{phaseLabel(call)}</p>
         <h2 className="call-name">@{call.peerName}</h2>
-        <p className="call-note">Media is encrypted by WebRTC and is never saved by Timber.</p>
+        <p className="call-note">End-to-end call secured</p>
 
         {incoming ? (
           <div className="call-actions">

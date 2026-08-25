@@ -48,7 +48,7 @@ function callError(error, fallback) {
 
 async function constrainedMedia(mode) {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("WebRTC calls need a modern browser with camera and microphone support.");
+    throw new Error("Calls need a modern browser with camera and microphone support.");
   }
   return navigator.mediaDevices.getUserMedia({
     audio: AUDIO_CONSTRAINTS,

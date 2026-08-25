@@ -23,10 +23,11 @@ import {
 } from "../../lib/notifications.js";
 import { disablePushAlerts, pushReadiness, pushSupported, PUSH_STATUS } from "../../lib/push.js";
 import { enableAllAlerts, pushStatusMessage } from "../../lib/alerts.js";
+import { LOCK_POLICIES, lockPolicyLabel, normalizeLockPolicy } from "../../lib/lockPolicy.js";
 import { getHealth } from "../../lib/api.js";
 import Modal from "../../components/Modal.jsx";
 
-export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped, initialPanel = null }) {
+export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped, lockPolicy = LOCK_POLICIES.twoHours, onLockPolicyChange, initialPanel = null }) {
   const { me, ladder } = useChatStore();
   const [panel, setPanel] = useState(() => ["phrase", "pin", "wipe"].includes(initialPanel) ? initialPanel : null);
   const [page, setPage] = useState(() => initialPanel === "notifications" ? "notifications" : "root");
@@ -109,10 +110,28 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
 
       <SettingsGroup
         title="Account & security"
-        footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it."
+        footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it. If you do not choose a policy, Timber automatically locks after two hours."
       >
         <SettingsRow icon={Icons.key} tint="amber" title="Recovery phrase" subtitle="Twelve words that are your account" onClick={() => setPanel("phrase")} />
         <SettingsRow icon={Icons.pin} tint="wood" title="Change PIN" subtitle={`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`} onClick={() => setPanel("pin")} />
+        <SettingsRow
+          icon={Icons.lock}
+          tint="wood"
+          title="Auto-lock"
+          subtitle={`${lockPolicyLabel(lockPolicy)} — a full reload still requires your PIN`}
+          control={(
+            <select
+              className="settings-select"
+              aria-label="Auto-lock preference"
+              value={normalizeLockPolicy(lockPolicy)}
+              onChange={(event) => onLockPolicyChange?.(event.target.value)}
+            >
+              <option value={LOCK_POLICIES.always}>Every login</option>
+              <option value={LOCK_POLICIES.twoHours}>After 2 hours</option>
+              <option value={LOCK_POLICIES.never}>Never automatically</option>
+            </select>
+          )}
+        />
         <SettingsRow icon={Icons.lock} tint="wood" title="Lock Timber" subtitle="Require your PIN to come back" action onClick={onSignOut} />
       </SettingsGroup>
 

@@ -72,9 +72,11 @@ of scope for this browser release.
 
 Timber is a browser app. HTTPS code delivery and a strict CSP are therefore part
 of its security boundary: a malicious deployment or an XSS flaw while the vault
-is unlocked can access the phrase and plaintext. The app locks after five minutes
-idle (or 30 seconds in the background), but a native client with hardware-backed
-storage is required for stronger device-compromise resistance.
+is unlocked can access the phrase and plaintext. By default, an unlocked session
+auto-locks after two hours; Settings also offers the stricter every-login policy
+and a never-automatically-lock policy. A full reload still requires the PIN, and
+a native client with hardware-backed storage is required for stronger
+device-compromise resistance.
 
 Never paste the recovery phrase into another website, keep it out of screenshots
 and cloud clipboards, and use a browser profile without untrusted extensions.

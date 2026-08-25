@@ -47,11 +47,15 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
         </div>
       </section>
 
-      <section className="profile-vault-card">
-        <div className="profile-storage-row">
-          <span className="profile-row-icon">☁</span>
-          <span><strong>Storage</strong><small>{syncing ? "Securely syncing" : "Encrypted on this device"}</small></span>
-          <span className="profile-storage-value"><b>{conversations.length}</b><small> Active rings</small></span>
+      <section className="profile-vault-card" aria-label="Secure chat summary">
+        <div className="profile-secure-card-head">
+          <span className="profile-row-icon" aria-hidden="true">☁</span>
+          <span className="profile-secure-card-copy"><strong>Secure chats</strong><small>{syncing ? "Syncing encrypted conversations" : "Encrypted on this device"}</small></span>
+          <span className="profile-secure-card-status"><i />{syncing ? "Syncing" : "Ready"}</span>
+        </div>
+        <div className="profile-secure-card-foot">
+          <span className="profile-storage-value"><b>{conversations.length}</b><small>active chats</small></span>
+          <small className="profile-secure-card-note">Private by default</small>
         </div>
       </section>
 
