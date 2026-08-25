@@ -5,6 +5,7 @@ import { useChatStore } from "../../store/chatStore.js";
 import { timeAgo } from "../../lib/time.js";
 import { filterConversations } from "./chatFilter.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 
 function previewText(preview) {
   if (!preview) return "No messages yet";
@@ -24,8 +25,10 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
     <div className="screen">
       <div className="screen-toolbar">
         <header className="screen-header">
-          <h1 className="screen-title">Chats</h1>
+          <span className="chat-list-mark" aria-hidden="true">{Icons.shield}</span>
+          <h1 className="screen-title">Timber</h1>
           {syncing && <span className="sync-dot" title="Syncing" />}
+          <button className="screen-header-action chat-list-compose" onClick={onFindPeople} aria-label="Start a private connection" title="Find people">✎</button>
         </header>
         <div className="search-wrap">
           <input

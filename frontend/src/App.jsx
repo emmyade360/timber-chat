@@ -28,6 +28,9 @@ import TogetherMark from "./components/Together/TogetherMark.jsx";
 import CallOverlay from "./components/Call/CallOverlay.jsx";
 import InstallTimberPrompt from "./components/Install/InstallTimberPrompt.jsx";
 import { usePwaInstall } from "./hooks/usePwaInstall.js";
+import { useTheme } from "./hooks/useTheme.js";
+import Vault from "./screens/Vault/Vault.jsx";
+import { mobileTabSelection, notificationMobileDestination } from "./lib/mobileNavigation.js";
 import "./index.css";
 
 export default function App() {
@@ -36,6 +39,7 @@ export default function App() {
   const [configurationError] = useState(() => runtimeConfigurationError());
   const [newAccountInstall, setNewAccountInstall] = useState(false);
   const pwa = usePwaInstall();
+  const [theme, setTheme] = useTheme();
 
   useEffect(() => {
     vaultExists().then((exists) => {
@@ -99,22 +103,22 @@ export default function App() {
 
   if (phase === "locked") return <Unlock onUnlocked={enter} onWiped={wiped} />;
 
-  return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
+  return <Shell onSignOut={lock} onWiped={wiped} pwa={pwa} theme={theme} onThemeChange={setTheme} newAccountInstall={newAccountInstall} onInstallHandled={() => setNewAccountInstall(false)} />;
 }
 
-// Four, not five: Growth moved inside Profile. It is a reference screen people
-// visit occasionally, and it was taking a permanent slot in a bar that has to
-// stay readable at 360px.
+// The reference mobile shell is deliberately compact: chats, private
+// discovery, and the owner's profile.
 const TABS = [
   { id: "chats", label: "Chats", icon: Icons.chats },
-  { id: "people", label: "People", icon: Icons.people },
-  { id: "explore", label: "Explore", icon: Icons.explore },
+  { id: "vault", label: "Vault", icon: Icons.vault },
   { id: "profile", label: "Profile", icon: Icons.profile },
 ];
 
-function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled }) {
+function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, newAccountInstall, onInstallHandled }) {
   const [tab, setTab] = useState("chats");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTarget, setSettingsTarget] = useState(null);
+  const [vaultPage, setVaultPage] = useState("root");
   const [openConversation, setOpenConversation] = useState(null);
   const [manualInstall, setManualInstall] = useState(false);
   const isDesktop = useIsDesktop();
@@ -145,7 +149,12 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
   useEffect(() => {
     const open = async (target) => {
       if (!target) return;
-      if (target.kind === "people") { setTab("people"); return; }
+      if (target.kind === "people") {
+        const destination = notificationMobileDestination(target.kind);
+        setVaultPage(destination.vaultPage);
+        setTab(destination.tab);
+        return;
+      }
       if (!target.conversationId) return;
       // A call answers itself through resumePendingCalls; showing the thread it
       // belongs to is the useful thing to do either way.
@@ -206,17 +215,34 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
         <Chats
           onOpen={setOpenConversation}
           activeConversationId={isDesktop ? openConversation : null}
-          onFindPeople={() => setTab("people")}
-          onInvite={() => { setTab("profile"); setSettingsOpen(true); }}
+          onFindPeople={() => { setVaultPage("people"); setTab("vault"); }}
+          onInvite={() => { setVaultPage("people"); setTab("vault"); }}
         />
       )}
-      {tab === "people" && <People onOpenConversation={openWithFriend} />}
-      {tab === "explore" && <Explore onOpenConversation={openWithFriend} />}
-      {tab === "profile" && !settingsOpen && <Profile onOpenSettings={() => setSettingsOpen(true)} />}
+      {tab === "vault" && vaultPage === "root" && (
+        <Vault onOpenPeople={() => setVaultPage("people")} onOpenExplore={() => setVaultPage("explore")} />
+      )}
+      {tab === "vault" && vaultPage === "people" && (
+        <People onOpenConversation={openWithFriend} onBack={() => setVaultPage("root")} />
+      )}
+      {tab === "vault" && vaultPage === "explore" && (
+        <Explore onOpenConversation={openWithFriend} onBack={() => setVaultPage("root")} />
+      )}
+      {tab === "profile" && !settingsOpen && (
+        <Profile
+          onOpenSettings={(target = null) => { setSettingsTarget(target); setSettingsOpen(true); }}
+          onOpenVault={(destination = "root") => { setVaultPage(destination); setTab("vault"); }}
+          theme={theme}
+          onThemeChange={onThemeChange}
+        />
+      )}
       {tab === "profile" && settingsOpen && (
         <Settings
-          onBack={() => setSettingsOpen(false)}
-          onOpenExplore={() => { setSettingsOpen(false); setTab("explore"); }}
+          initialPanel={settingsTarget}
+          theme={theme}
+          onThemeChange={onThemeChange}
+          onBack={() => { setSettingsOpen(false); setSettingsTarget(null); }}
+          onOpenExplore={() => { setSettingsOpen(false); setSettingsTarget(null); setVaultPage("explore"); setTab("vault"); }}
           onOpenInstall={() => setManualInstall(true)}
           onSignOut={onSignOut}
           onWiped={onWiped}
@@ -240,15 +266,21 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
   const nav = (
     <nav className="tab-bar" aria-label="Sections">
       {TABS.map((entry) => {
-        const badge =
-          entry.id === "chats" ? totalUnread : entry.id === "people" ? pendingReceived.length : 0;
+        const badge = entry.id === "chats" ? totalUnread : entry.id === "vault" ? pendingReceived.length : 0;
         return (
           <button
             key={entry.id}
             className={`tab ${tab === entry.id ? "tab--active" : ""}`}
             aria-current={tab === entry.id ? "page" : undefined}
             title={entry.label}
-            onClick={() => { setSettingsOpen(false); setTab(entry.id); }}
+            onClick={() => {
+              const selection = mobileTabSelection(entry.id);
+              if (selection.closeConversation) setOpenConversation(null);
+              setSettingsOpen(false);
+              setSettingsTarget(null);
+              if (selection.vaultPage) setVaultPage(selection.vaultPage);
+              setTab(selection.tab);
+            }}
           >
             <span className="tab-icon">{entry.icon}</span>
             <span className="tab-label">{entry.label}</span>
@@ -259,13 +291,15 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
     </nav>
   );
 
-  // Phone: one thing at a time, and a conversation takes the whole screen.
+  // On the phone, a thread remains full height but its bottom navigation stays
+  // reachable, exactly like the reference surface.
   if (!isDesktop) {
     if (openConversation) {
       return (
         <div className="app-shell">
           {!connected && <div className="offline-bar">Reconnecting…</div>}
           {conversation}
+          {nav}
           <CallOverlay {...callController} />
         </div>
       );
@@ -308,4 +342,3 @@ function Shell({ onSignOut, onWiped, pwa, newAccountInstall, onInstallHandled })
     </div>
   );
 }
-

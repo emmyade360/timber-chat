@@ -3,11 +3,9 @@
 
 import { useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
-import GrowthBar from "../../components/Level/GrowthBar.jsx";
-import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import { updateCurrentUser, userMessage } from "../../lib/api.js";
-import { SettingsGroup, SettingsRow } from "../../components/Settings/SettingsList.jsx";
 import { Icons } from "../../components/Settings/icons.jsx";
+import Modal from "../../components/Modal.jsx";
 
 function ProfileAvatar({ username, url, size = "large" }) {
   if (url) return <AvatarImage key={url} username={username} url={url} size={size} />;
@@ -20,63 +18,74 @@ function AvatarImage({ username, url, size }) {
   return <img className={`profile-avatar profile-avatar--${size}`} src={url} alt="Your profile" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 
-export default function Profile({ onOpenSettings }) {
-  const { me } = useChatStore();
+export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeChange }) {
+  const { me, conversations, syncing } = useChatStore();
   const [editing, setEditing] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
 
   if (!me) return <div className="screen"><div className="empty-state">Loading profile…</div></div>;
   if (editing) return <ProfileEditor me={me} onBack={() => setEditing(false)} />;
 
-  const joined = me.created_at ? new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(me.created_at)) : "Unknown";
-
   return (
     <div className="screen profile-screen">
-      <header className="screen-header">
-        <h1 className="screen-title">Profile</h1>
-        <button className="screen-header-action" onClick={onOpenSettings} aria-label="Open settings" title="Settings">
+      <header className="timber-header">
+        <span className="timber-header-mark" aria-hidden="true">◈</span>
+        <h1>Timber</h1>
+        <button className="screen-header-action" onClick={() => onOpenSettings()} aria-label="Open settings" title="Settings">
           {Icons.settings}
         </button>
       </header>
 
-      <section className="profile-view-hero">
+      <section className="profile-reference-hero">
         <ProfileAvatar username={me.username} url={me.avatar_url} />
+        <button className="profile-avatar-edit" onClick={() => setEditing(true)} aria-label="Edit profile photo">✎</button>
         <div className="profile-view-identity">
           <h2>
-            @{me.username}
-            <LevelBadge level={me.level} size={20} name={me.level_name} className="name-gem" />
+            {me.username}
           </h2>
-          <p>Joined {joined}</p>
+          <p className="profile-secure"><span>◉</span> Secure</p>
         </div>
-        <button className="btn-wood profile-edit-button" onClick={() => setEditing(true)}>Edit profile</button>
       </section>
 
-      <SettingsGroup
-        title="Identity"
-        footnote="Your username is permanent because it is bound to your non-custodial account identity. Timber never asks for an email or password."
-      >
-        <SettingsRow icon={Icons.profile} tint="wood" title="Username" subtitle={`@${me.username}`} value="Permanent" />
-      </SettingsGroup>
-
-      <SettingsGroup title="Growth" footnote="Growth reflects steady, consent-based connection — never message volume, time online, or popularity.">
-        <div className="settings-item settings-item--plain">
-          <GrowthBar me={me} badgeSize={34} />
+      <section className="profile-vault-card">
+        <div className="profile-storage-row">
+          <span className="profile-row-icon">☁</span>
+          <span><strong>Storage</strong><small>{syncing ? "Securely syncing" : "Encrypted on this device"}</small></span>
+          <span className="profile-storage-value"><b>{conversations.length}</b><small> Active rings</small></span>
         </div>
-      </SettingsGroup>
+      </section>
 
-      <SettingsGroup
-        title="Privacy"
-        footnote="Your photo is standard account metadata, not encrypted chat content. It is optional. Explore uses a separate, opt-in public card with its own photo and bio."
-      >
-        <SettingsRow
-          icon={Icons.lock}
-          tint="amber"
-          title="Privacy & settings"
-          subtitle="Notifications, security, and this device"
-          onClick={onOpenSettings}
-        />
-      </SettingsGroup>
+      <section className="profile-actions" aria-label="Profile settings">
+        <ProfileRow icon="⚿" title="Recovery phrase" subtitle="Back up your identity" onClick={() => onOpenSettings("phrase")} />
+        <ProfileRow icon="♧" title="Notifications" subtitle="Alerts and sounds" toggle onClick={() => onOpenSettings("notifications")} />
+        <ProfileRow icon="◉" title="Privacy" subtitle="Connections and discovery" onClick={() => onOpenVault("explore")} />
+        <ProfileRow icon="◌" title="Theme" subtitle={`${theme[0].toUpperCase()}${theme.slice(1)}${theme === "dark" ? " (Default)" : ""}`} onClick={() => setThemeOpen(true)} />
+      </section>
+
+      {themeOpen && (
+        <Modal title="Theme" onClose={() => setThemeOpen(false)}>
+          <p className="panel-note">This device only. It never leaves your encrypted vault.</p>
+          {[
+            ["dark", "Dark", "The Timber default"],
+            ["light", "Light", "A brighter local surface"],
+            ["system", "System", "Follow this device"],
+          ].map(([value, label, note]) => (
+            <button key={value} className={`theme-choice ${theme === value ? "theme-choice--active" : ""}`} onClick={() => { onThemeChange(value); setThemeOpen(false); }}>
+              <span><strong>{label}</strong><small>{note}</small></span><span>{theme === value ? "✓" : ""}</span>
+            </button>
+          ))}
+        </Modal>
+      )}
     </div>
   );
+}
+
+function ProfileRow({ icon, title, subtitle, onClick, toggle = false }) {
+  return <button className="profile-action-row" onClick={onClick}>
+    <span className="profile-action-icon">{icon}</span>
+    <span><strong>{title}</strong><small>{subtitle}</small></span>
+    {toggle ? <span className="profile-toggle" aria-hidden="true"><i /></span> : <span className="profile-row-chevron">›</span>}
+  </button>;
 }
 
 function ProfileEditor({ me, onBack }) {

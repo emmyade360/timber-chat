@@ -26,16 +26,17 @@ import { enableAllAlerts } from "../../lib/alerts.js";
 import { getHealth } from "../../lib/api.js";
 import Modal from "../../components/Modal.jsx";
 
-export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped }) {
+export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped, initialPanel = null }) {
   const { me, ladder } = useChatStore();
-  const [panel, setPanel] = useState(null);
-  const [page, setPage] = useState("root");
+  const [panel, setPanel] = useState(() => ["phrase", "pin", "wipe"].includes(initialPanel) ? initialPanel : null);
+  const [page, setPage] = useState(() => initialPanel === "notifications" ? "notifications" : "root");
 
   if (!me) return <div className="screen"><div className="empty-state">Loading…</div></div>;
 
   if (page === "growth") return <GrowthPage me={me} ladder={ladder} onBack={() => setPage("root")} />;
   if (page === "invite") return <SubPage title="Invite friends" onBack={() => setPage("root")}><InvitePanel /></SubPage>;
   if (page === "transfer") return <TransferPage onBack={() => setPage("root")} />;
+  if (page === "notifications") return <SubPage title="Notifications" onBack={() => setPage("root")}><NotificationGroup /></SubPage>;
 
   return (
     <div className="screen">
@@ -72,7 +73,9 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
         />
       </SettingsGroup>
 
-      <NotificationGroup />
+      <SettingsGroup title="Notifications">
+        <SettingsRow icon={Icons.bell} tint="amber" title="Private notifications" subtitle="Alerts and sounds for this device" onClick={() => setPage("notifications")} />
+      </SettingsGroup>
 
       <SettingsGroup
         title="Privacy"

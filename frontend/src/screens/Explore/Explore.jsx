@@ -25,7 +25,7 @@ const EMPTY_PROFILE = {
   metro_area: "",
 };
 
-export default function Explore({ onOpenConversation }) {
+export default function Explore({ onOpenConversation, onBack }) {
   const [profile, setProfile] = useState(EMPTY_PROFILE);
   const [allowedInterests, setAllowedInterests] = useState([]);
   const [cards, setCards] = useState([]);
@@ -155,6 +155,7 @@ export default function Explore({ onOpenConversation }) {
   return (
     <div className="screen explore-screen">
       <header className="screen-header">
+        {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back to Vault">‹</button>}
         <h1 className="screen-title">Explore</h1>
       </header>
 

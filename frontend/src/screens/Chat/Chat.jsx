@@ -87,6 +87,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
   const [savedEntries, setSavedEntries] = useState([]);
   const [recording, setRecording] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const scrollRef = useRef(null);
   const typingTimer = useRef(null);
   const isTyping = useRef(false);
@@ -350,15 +351,25 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
               {conversation?.peerLevel && (
                 <LevelBadge level={conversation.peerLevel} size={15} name={conversation.peerLevelName} className="name-gem" />
               )}
-            </span><span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : "offline"}</span></div>
+            </span><span className="chat-header-sub"><span className="chat-e2e-label">▣ E2E encrypted</span>{peerTyping && " · typing…"}</span></div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
           <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("audio")} aria-label="Start audio call" title="Start low-data audio call">{Icons.callAudio}</button>
-          <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">{Icons.callVideo}</button>
-          <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages" title="Saved messages">{Icons.star}</button>
-          <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"} title={notificationsMuted ? "Unmute" : "Mute"}>{notificationsMuted ? Icons.bellOff : Icons.bell}</button>
-          <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation" title="Search">{Icons.search}</button>
-          {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number" title={verified ? "Verified" : "Verify safety number"}>{Icons.shield}</button>}
+          <div className="chat-header-extra">
+            <button className="chat-header-action" disabled={!secure || call?.phase !== "idle"} onClick={() => startCall("video")} aria-label="Start video call" title="Start video call">{Icons.callVideo}</button>
+            <button className="chat-header-action" onClick={showSaved} aria-label="View private saved messages" title="Saved messages">{Icons.star}</button>
+            <button className="chat-header-action" onClick={toggleChatNotifications} aria-label={notificationsMuted ? "Turn on chat notifications" : "Mute chat notifications"} title={notificationsMuted ? "Unmute" : "Mute"}>{notificationsMuted ? Icons.bellOff : Icons.bell}</button>
+            <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation" title="Search">{Icons.search}</button>
+            {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number" title={verified ? "Verified" : "Verify safety number"}>{Icons.shield}</button>}
+          </div>
+          <button className="chat-header-action chat-header-overflow" onClick={() => setActionsOpen((open) => !open)} aria-expanded={actionsOpen} aria-label="More conversation actions">⋮</button>
+          {actionsOpen && <div className="chat-action-sheet">
+            <button disabled={!secure || call?.phase !== "idle"} onClick={() => { setActionsOpen(false); startCall("video"); }}>{Icons.callVideo}<span>Video call</span></button>
+            <button onClick={() => { setActionsOpen(false); showSaved(); }}>{Icons.star}<span>Saved messages</span></button>
+            <button onClick={() => { setActionsOpen(false); toggleChatNotifications(); }}>{notificationsMuted ? Icons.bellOff : Icons.bell}<span>{notificationsMuted ? "Unmute alerts" : "Mute alerts"}</span></button>
+            <button onClick={() => { setActionsOpen(false); setSearchOpen((open) => !open); }}>{Icons.search}<span>Search chat</span></button>
+            {safetyNumber && <button onClick={() => { setActionsOpen(false); setShowSafety(true); }}>{Icons.shield}<span>{verified ? "Verified contact" : "Verify contact"}</span></button>}
+          </div>}
         </div>
       </header>
 
@@ -396,10 +407,10 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
       {replyTo && <div className="reply-bar"><span>Replying to {labelForPayload(replyTo.payload).slice(0, 70)}</span><button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
       <div className="composer">
         <input ref={fileInput} className="sr-only" type="file" accept={FILE_ACCEPT} onChange={(event) => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
-        <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">＋</button>
-        <button className={`composer-attach ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? "■" : "●"}</button>
+        <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">⌇</button>
+        <button className={`composer-attach composer-record ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? "■" : "◉"}</button>
         <input className="glass-input composer-input" placeholder="Say something…" value={text} onChange={(event) => handleChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} disabled={!secure} />
-        <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()}>Send</button>
+        <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()} aria-label="Send message">➤</button>
       </div>
 
       {showSafety && (

@@ -32,7 +32,7 @@ function normalizedSearchTerm(value) {
 /** The three things this screen can be showing, aside from search results. */
 const VIEWS = { active: "active", requests: "requests", friends: "friends" };
 
-export default function People({ onOpenConversation }) {
+export default function People({ onOpenConversation, onBack }) {
   const { friends, pendingReceived, pendingSent, setFriends, onlineUsers, me, conversations, unread } =
     useChatStore();
   const [view, setView] = useState(VIEWS.active);
@@ -138,6 +138,7 @@ export default function People({ onOpenConversation }) {
     <div className="screen">
       <div className="screen-toolbar">
         <header className="screen-header">
+          {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back to Vault">‹</button>}
           <h1 className="screen-title">People</h1>
           <div className="people-views" role="group" aria-label="People views">
             <ViewIcon

@@ -23,6 +23,9 @@ export const Icons = {
   chats: (
     <svg {...stroke}><path d="M20.5 12.5c0 3.9-3.8 7-8.5 7a9.8 9.8 0 0 1-2.6-.34L4.5 20.5l1.2-3.5A6.6 6.6 0 0 1 3.5 12.5c0-3.9 3.8-7 8.5-7s8.5 3.1 8.5 7Z" /></svg>
   ),
+  vault: (
+    <svg {...stroke}><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7.5a4 4 0 0 1 8 0V10" /><path d="M12 14v2" /></svg>
+  ),
   people: (
     <svg {...stroke}><circle cx="9" cy="8" r="3.4" /><path d="M2.9 19.8c0-3.2 2.7-5.4 6.1-5.4s6.1 2.2 6.1 5.4" /><path d="M16.2 5.1a3.4 3.4 0 0 1 0 6.5" /><path d="M17.6 14.7c2.2.5 3.7 2.2 3.7 4.5" /></svg>
   ),
