@@ -405,7 +405,13 @@ export async function receiveMessage(payload) {
   const conversationId = payload.conversation_id;
   const identity = currentIdentity();
   const mine = payload.sender_id === identity.userId;
-  const isActive = store.activeConversationId === conversationId;
+  // "Active" has to mean the person can actually see this conversation, not
+  // merely that its screen is still mounted. A phone that locks with a chat
+  // open keeps activeConversationId set, and treating that as active suppressed
+  // the notification *and* left the socket open so the relay thought they were
+  // online and sent no push either -- total silence for the one conversation
+  // they were most likely in.
+  const isActive = store.activeConversationId === conversationId && documentVisible();
 
   if (!(await getConversation(conversationId))) {
     // A message for a conversation this device has not seen yet -- a friend
@@ -433,10 +439,7 @@ export async function receiveMessage(payload) {
       senderId: payload.sender_id,
       createdAt: toMillis(payload.created_at),
       envelope: payload,
-      // A phone that locks with the chat mounted still has activeConversationId
-      // set. Without the visibility check those arrivals would be marked seen
-      // and dropped from the badge while nobody was looking at them.
-      seen: mine || (isActive && documentVisible()),
+      seen: mine || isActive,
     });
   }
 

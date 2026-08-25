@@ -885,14 +885,32 @@ pub async fn deliver_due_scheduled_messages(state: &AppState) -> Result<(), ApiE
         .await?;
         sqlx::query("UPDATE scheduled_messages SET delivered_at = NOW() WHERE id = $1")
             .bind(scheduled.id).execute(&mut *tx).await?;
-        deliveries.push((scheduled.sender_id, peer, scheduled.client_id, row));
+        deliveries.push((
+            scheduled.sender_id,
+            peer,
+            scheduled.conversation_id,
+            scheduled.client_id,
+            row,
+        ));
     }
     tx.commit().await?;
-    for (sender, peer, client_id, row) in deliveries {
+    for (sender, peer, conversation_id, client_id, row) in deliveries {
         let mut payload = serde_json::to_value(StoredMessage::from(row))
             .map_err(|error| ApiError::Internal(error.to_string()))?;
         if let Some(client_id) = client_id { payload["client_id"] = Value::String(client_id); }
         publish(state, EventTarget::Pair(sender, peer), "message.new", payload);
+
+        // A scheduled message lands exactly like any other one, so it has to
+        // notify like any other one. Without this a "deliver later" message
+        // reached an offline recipient in total silence.
+        let sender_name: Option<String> =
+            sqlx::query_scalar("SELECT username FROM profiles WHERE id = $1")
+                .bind(sender)
+                .fetch_optional(&state.db)
+                .await?;
+        if let Some(sender_name) = sender_name {
+            notify_offline_recipient(state, peer, conversation_id, &sender_name).await;
+        }
     }
     Ok(())
 }

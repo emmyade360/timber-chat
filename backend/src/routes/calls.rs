@@ -233,6 +233,15 @@ pub async fn cleanup_expired_calls(state: &AppState) {
     }
 }
 
+/// Whether background alerts can be sent at all.
+///
+/// Checked once at startup because the failure is otherwise invisible: without
+/// these variables every push is skipped silently, users get nothing when the
+/// app is closed, and there is no log line anywhere saying why.
+pub fn push_configured() -> bool {
+    vapid_configuration().is_some()
+}
+
 fn vapid_configuration() -> Option<(String, String)> {
     let private_key = env::var("WEB_PUSH_VAPID_PRIVATE_KEY").ok().filter(|key| !key.trim().is_empty())?;
     let subject = env::var("WEB_PUSH_VAPID_SUBJECT").ok().filter(|value| value.starts_with("mailto:") || value.starts_with("https://"))?;
@@ -357,5 +366,35 @@ mod tests {
         assert!(valid_push_subscription(&subscription("https://web.push.apple.com/Q2hhbmdlTWU")));
         assert!(!valid_push_subscription(&subscription("https://127.0.0.1/push")));
         assert!(!valid_push_subscription(&subscription("https://example.com/push")));
+    }
+}
+
+#[cfg(test)]
+mod push_config_tests {
+    /// The startup warning is the only signal that background alerts are off.
+    /// If this ever stops reflecting the environment, users get silence and the
+    /// logs say nothing about why.
+    #[test]
+    fn push_is_reported_as_configured_only_with_both_variables() {
+        // SAFETY: single-threaded test, restored before returning.
+        unsafe {
+            std::env::remove_var("WEB_PUSH_VAPID_PRIVATE_KEY");
+            std::env::remove_var("WEB_PUSH_VAPID_SUBJECT");
+        }
+        assert!(!super::push_configured(), "no variables means no push");
+
+        unsafe { std::env::set_var("WEB_PUSH_VAPID_PRIVATE_KEY", "a-key") };
+        assert!(!super::push_configured(), "a key alone is not enough");
+
+        unsafe { std::env::set_var("WEB_PUSH_VAPID_SUBJECT", "not-a-uri") };
+        assert!(!super::push_configured(), "the subject must be mailto: or https:");
+
+        unsafe { std::env::set_var("WEB_PUSH_VAPID_SUBJECT", "mailto:ops@example.com") };
+        assert!(super::push_configured(), "both present and well formed");
+
+        unsafe {
+            std::env::remove_var("WEB_PUSH_VAPID_PRIVATE_KEY");
+            std::env::remove_var("WEB_PUSH_VAPID_SUBJECT");
+        }
     }
 }

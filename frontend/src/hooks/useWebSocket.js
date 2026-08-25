@@ -13,7 +13,6 @@ import { useChatStore } from "../store/chatStore.js";
 import {
   acknowledgeDelivery,
   acknowledgeRead,
-  documentVisible,
   markConversationRead,
   receiveMessage,
   reconcileRealtime,
@@ -136,7 +135,7 @@ export function useWebSocket(enabled) {
                 // read the moment it arrives. Without this it was stored seen,
                 // so the "mark everything unseen" sweep never found it and the
                 // sender sat on two ticks no matter how quickly they replied.
-                if (received.isActive && documentVisible()) {
+                if (received.isActive) {
                   await acknowledgeRead(payload.conversation_id);
                 }
               }

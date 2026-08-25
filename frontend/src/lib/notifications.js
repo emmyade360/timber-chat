@@ -2,6 +2,7 @@
 // metadata, and notifications intentionally never include decrypted message text.
 
 import { getMeta, setMeta } from "../db/localStore.js";
+import { playMessageTone } from "./callTones.js";
 
 const SETTINGS_KEY = "notification-settings";
 const DIGEST_KEY = "notification-digest";
@@ -33,9 +34,12 @@ export async function setChatNotification(conversationId, mode) {
  * badge, the call overlay, and the chat list have already said it, and a second
  * announcement on top of that is just noise.
  */
+const documentVisible = () =>
+  typeof document === "undefined" || document.visibilityState === "visible";
+
 async function canNotify({ requireHidden = true } = {}) {
   if (!("Notification" in window)) return null;
-  if (requireHidden && typeof document !== "undefined" && !document.hidden) return null;
+  if (requireHidden && documentVisible()) return null;
   const settings = await notificationSettings();
   if (!settings.enabled || Notification.permission !== "granted") return null;
   return settings;
@@ -86,10 +90,25 @@ export async function notifyIncomingCall({ username, mode }) {
   return true;
 }
 
+/**
+ * Mark a message that arrived from someone else.
+ *
+ * Two cues, because they cover different situations. The tone is for a person
+ * who has Timber open but is not looking at that thread -- an OS notification
+ * there would be redundant and is suppressed, which used to leave the arrival
+ * completely silent. The notification is for a person who cannot see the app.
+ */
 export async function notifyIncoming({ conversationId, username, message, isActive, mine }) {
-  if (mine || isActive || message?.payload?.quiet || !("Notification" in window)) return;
+  if (mine || isActive || message?.payload?.quiet) return;
   const settings = await notificationSettings();
-  if (!settings.enabled || Notification.permission !== "granted" || settings.chats?.[conversationId] === "muted") return;
+  if (settings.chats?.[conversationId] === "muted") return;
+
+  if (documentVisible()) {
+    playMessageTone();
+    return;
+  }
+  if (!("Notification" in window)) return;
+  if (!settings.enabled || Notification.permission !== "granted") return;
   if (settings.digest) {
     const digest = (await getMeta(DIGEST_KEY)) ?? {};
     await setMeta(DIGEST_KEY, { ...digest, [conversationId]: (digest[conversationId] ?? 0) + 1 });
@@ -97,8 +116,12 @@ export async function notifyIncoming({ conversationId, username, message, isActi
   }
   new Notification("Timber", {
     body: `New private message from @${username ?? "a contact"}`,
+    // Tagged per conversation so a thread collapses to one entry rather than
+    // stacking, but `renotify` must be true or the replacement is silent: the
+    // first message in a thread alerted and every one after it arrived without
+    // a sound, which reads as "notifications stopped working".
     tag: `timber:${conversationId}`,
-    renotify: false,
+    renotify: true,
   });
 }
 

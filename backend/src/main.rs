@@ -356,6 +356,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .with_state(state);
 
+    if routes::calls::push_configured() {
+        info!("Background alerts enabled: calls and messages will reach closed apps.");
+    } else {
+        warn!(
+            "WEB_PUSH_VAPID_PRIVATE_KEY / WEB_PUSH_VAPID_SUBJECT are not set. \
+             Calls and messages will NOT notify anyone whose app is closed."
+        );
+    }
+
     let address: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(%address, "Timber backend listening");

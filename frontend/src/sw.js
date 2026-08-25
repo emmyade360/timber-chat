@@ -50,9 +50,12 @@ function notificationFor(data) {
     // and the push service should learn no more than the relay does.
     return [`Timber`, {
       body: `New private message from @${data.username ?? 'a contact'}`,
-      // Keyed to the conversation so a burst replaces rather than stacks.
+      // Keyed to the conversation so a thread collapses to one entry rather
+      // than stacking. `renotify` must stay true: replacing a notification
+      // without it is silent, so only the first message in a thread ever
+      // alerted and the rest arrived with no sound at all.
       tag: `timber-chat:${data.conversationId ?? 'unknown'}`,
-      renotify: false,
+      renotify: true,
     }];
   }
   return null;
@@ -69,6 +72,20 @@ function targetFor(data) {
   return { kind: 'people' };
 }
 
+/**
+ * The fallback notification.
+ *
+ * A push subscription is `userVisibleOnly`, so showing nothing is a promise
+ * broken: browsers surface their own "this site was updated in the background"
+ * and, after repeated offences, revoke the subscription outright -- which would
+ * end notifications on that device permanently and silently. A payload we
+ * cannot classify still has to put something on screen.
+ */
+const GENERIC = ['Timber', {
+  body: 'Something is waiting for you in Timber.',
+  tag: 'timber-generic',
+}];
+
 /** The cold-start form of the same target, as query parameters. */
 function urlFor(target) {
   if (target.kind === 'chat' && target.conversationId) {
@@ -84,9 +101,7 @@ function urlFor(target) {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data?.json() ?? {}; } catch { /* malformed push is ignored */ }
-  const notification = notificationFor(data);
-  if (!notification) return;
-  const [title, options] = notification;
+  const [title, options] = notificationFor(data) ?? GENERIC;
   event.waitUntil(self.registration.showNotification(title, {
     icon: '/icons/timber-192.png',
     badge: '/icons/timber-192.png',
