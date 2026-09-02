@@ -15,6 +15,7 @@ use crate::{
     error::ApiError,
     growth::{self, GrowthKind},
     levels,
+    streaks,
     models::{
         PublicProfile, SearchQuery, SearchResult, SelfProfile, SelfProfileRow, UserSearchRow,
     },
@@ -23,9 +24,8 @@ use crate::{
 
 /// Redeem an invite code for a freshly created account.
 ///
-/// An invite starts both people as friends, unless somebody has blocked the other.
-/// It is not a growth multiplier: inviting people is never required or rewarded for
-/// personal progress. Returns the inviter's username.
+/// An invite starts both people as friends, unless somebody has blocked the other,
+/// and credits the inviter with referral growth. Returns the inviter's username.
 ///
 /// A code that does not resolve is ignored rather than fatal: the account has
 /// already been created, and failing the signup over a mistyped link would be worse
@@ -59,6 +59,18 @@ pub async fn redeem_invite(
     if credited.rows_affected() == 0 {
         return Ok(None);
     }
+
+    // Referrals earn growth now. This is the source most worth faking, so it
+    // leans on two things that were already true: the referrals PRIMARY KEY
+    // makes the credit exactly-once per invited account, and the daily cap in
+    // growth_daily bounds how fast a signup farm could pay off.
+    growth::award(
+        &state.db,
+        referrer_id,
+        GrowthKind::Referral,
+        growth::POINTS_PER_REFERRAL,
+    )
+    .await?;
 
     // Skip the auto-friendship if either side has blocked the other; an invite
     // link must not be a way around a block.
@@ -381,8 +393,109 @@ pub async fn get_growth(Extension(_user): Extension<AuthUser>) -> Json<Value> {
             { "kind": "check_in",   "label": "An intentional daily check-in", "points": growth::POINTS_PER_CHECK_IN, "daily_cap": GrowthKind::CheckIn.daily_cap() },
             { "kind": "rhythm",     "label": "A steady connection rhythm", "points": growth::POINTS_PER_RHYTHM_DAY, "daily_cap": GrowthKind::Rhythm.daily_cap() },
             { "kind": "connection", "label": "A mutually accepted connection", "points": growth::POINTS_PER_CONNECTION, "daily_cap": GrowthKind::Connection.daily_cap() },
+            { "kind": "message",    "label": "Talking to someone", "points": growth::POINTS_PER_MESSAGE, "daily_cap": GrowthKind::Message.daily_cap() },
+            { "kind": "streak",     "label": "Keeping a streak alive", "points": growth::POINTS_PER_STREAK_DAY, "daily_cap": GrowthKind::Streak.daily_cap() },
+            { "kind": "referral",   "label": "Someone joined through you", "points": growth::POINTS_PER_REFERRAL, "daily_cap": GrowthKind::Referral.daily_cap() },
         ],
     }))
+}
+
+/// Every live streak this account holds, for the flame on each chat row.
+pub async fn get_streaks(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Result<Json<Value>, ApiError> {
+    let streaks = streaks::for_user(&state.db, user.id).await?;
+    Ok(Json(json!({
+        "streaks": streaks
+            .into_iter()
+            .map(|(peer_id, streak)| json!({
+                "peer_id": peer_id,
+                "days": streak.days,
+                "extended_today": streak.extended_today,
+                "at_risk": streak.at_risk,
+            }))
+            .collect::<Vec<_>>(),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct LeaderboardOptIn {
+    pub opted_in: bool,
+}
+
+/// Join or leave the public ranking.
+///
+/// Growth points were private until this release; a leaderboard makes them
+/// comparable between accounts, which is a disclosure rather than a display
+/// choice. So it is off by default and reversible.
+pub async fn set_leaderboard_opt_in(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+    Json(input): Json<LeaderboardOptIn>,
+) -> Result<Json<Value>, ApiError> {
+    sqlx::query("UPDATE profiles SET leaderboard_opt_in = $2 WHERE id = $1")
+        .bind(user.id)
+        .bind(input.opted_in)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(json!({ "opted_in": input.opted_in })))
+}
+
+/// The top of the public ranking, plus where this account sits in it.
+pub async fn get_leaderboard(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthUser>,
+) -> Result<Json<Value>, ApiError> {
+    // Only opted-in rows are ever readable here, so someone who has not joined
+    // is absent from the list rather than merely unranked.
+    let rows: Vec<(Uuid, String, Option<String>, i64, i16)> = sqlx::query_as(
+        r#"
+        SELECT id, username, avatar_url, growth_points, level
+        FROM profiles
+        WHERE leaderboard_opt_in = TRUE
+        ORDER BY growth_points DESC, username ASC
+        LIMIT 100
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let (opted_in, rank): (bool, Option<i64>) = sqlx::query_as(
+        r#"
+        SELECT
+            p.leaderboard_opt_in,
+            CASE WHEN p.leaderboard_opt_in THEN (
+                SELECT COUNT(*) + 1 FROM profiles other
+                WHERE other.leaderboard_opt_in = TRUE
+                  AND other.growth_points > p.growth_points
+            ) END
+        FROM profiles p
+        WHERE p.id = $1
+        "#,
+    )
+    .bind(user.id)
+    .fetch_one(&state.db)
+    .await?;
+
+    Ok(Json(json!({
+        "opted_in": opted_in,
+        "rank": rank,
+        "entries": rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, (id, username, avatar_url, growth_points, level))| json!({
+                "position": index + 1,
+                "id": id,
+                "username": username,
+                "avatar_url": avatar_url,
+                "growth_points": growth_points,
+                "level": level,
+                "level_name": crate::models::level_name(level),
+                "is_me": id == user.id,
+            }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 #[cfg(test)]

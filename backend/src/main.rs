@@ -14,6 +14,7 @@ mod models;
 mod routes;
 mod ws;
 mod growth;
+mod streaks;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -270,6 +271,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let protected_api = Router::new()
         .route("/growth", get(routes::users::get_growth))
+        .route("/streaks", get(routes::users::get_streaks))
+        .route("/leaderboard", get(routes::users::get_leaderboard))
+        .route("/leaderboard/opt-in", post(routes::users::set_leaderboard_opt_in))
         .route(
             "/users/me",
             get(routes::users::get_current_user).patch(routes::users::update_current_user),

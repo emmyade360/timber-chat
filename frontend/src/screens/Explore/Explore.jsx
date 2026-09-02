@@ -36,10 +36,10 @@ export default function Explore({ onOpenConversation, onBack }) {
   const [loading, setLoading] = useState(true);
   const [reporting, setReporting] = useState(null);
 
-  const load = async () => {
-    setLoading(true);
+  const fetchExplore = async (isStale = () => false) => {
     try {
       const [profileResponse, matchesResponse] = await Promise.all([getExploreProfile(), getExploreMatches()]);
+      if (isStale()) return;
       const saved = profileResponse.data.profile;
       setAllowedInterests(profileResponse.data.allowed_interests ?? []);
       setMetroConfigured(Boolean(profileResponse.data.metro_configured));
@@ -56,20 +56,32 @@ export default function Explore({ onOpenConversation, onBack }) {
       setMatches(matchesResponse.data.matches ?? []);
       if (saved?.is_visible) {
         const deck = await getExploreCards();
+        if (isStale()) return;
         setCards(deck.data.cards ?? []);
       } else {
         setCards([]);
       }
     } catch (error) {
+      if (isStale()) return;
       setNotice(userMessage(error, "Explore is unavailable right now."));
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => { load(); }, 0);
-    return () => clearTimeout(timer);
+    // Was a `setTimeout(..., 0)`, which only deferred the double request
+    // StrictMode makes rather than stopping either from landing -- and which
+    // quietly hid a synchronous state update inside the Effect. React's own
+    // answer to a fetch in an Effect is to ignore the stale result instead.
+    //
+    // `loading` already starts true, so the first load has nothing to set.
+    let ignore = false;
+    async function startFetching() {
+      await fetchExplore(() => ignore);
+    }
+    void startFetching();
+    return () => { ignore = true; };
   }, []);
 
   const save = async (visible = profile.is_visible) => {

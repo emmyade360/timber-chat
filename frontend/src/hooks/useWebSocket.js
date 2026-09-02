@@ -6,7 +6,7 @@
 // worse than one that visibly disconnects.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createWebSocketTicket, getToken } from "../lib/api.js";
+import { createWebSocketTicket, getToken, onTokenChange } from "../lib/api.js";
 import { signIn } from "../lib/auth.js";
 import { currentIdentity, isUnlocked } from "../crypto/session.js";
 import { useChatStore } from "../store/chatStore.js";
@@ -200,9 +200,25 @@ export function useWebSocket(enabled) {
           case "growth.stage_reached":
             store.showLevelUp(payload);
             break;
+          case "streak.updated":
+            // Both sides of the pair receive this, so neither has to refetch to
+            // see the same number.
+            if (payload.peer_id ?? payload.conversation_id) {
+              const conversation = store.conversations
+                .find((entry) => entry.id === payload.conversation_id);
+              const peerId = payload.peer_id ?? conversation?.peerId;
+              if (peerId) {
+                store.setStreak(peerId, {
+                  days: payload.days,
+                  extended_today: payload.extended_today,
+                  at_risk: payload.at_risk,
+                });
+              }
+            }
+            break;
           case "referral.joined":
-            // Someone accepted an invite; refresh so the new auto-friendship
-            // appears without a reload. Invites never award growth points.
+            // Someone accepted an invite; refresh so the new auto-friendship and
+            // the referral growth both appear without a reload.
             try {
               store.setFriends((await getFriends()).data);
               store.setMe((await getCurrentUser()).data);
@@ -249,7 +265,20 @@ export function useWebSocket(enabled) {
 
     connect();
 
+    // `connect` returns without rescheduling when there is no token, because
+    // there is nothing to open a ticket with. That is the state the app is in
+    // when it opens while the relay is still waking, so the arrival of a token
+    // is the signal to try again -- otherwise the socket would stay closed for
+    // the rest of the session.
+    const stopWatchingToken = onTokenChange((next) => {
+      if (!next || socketRef.current || closedByUs.current) return;
+      attemptRef.current = 0;
+      clearTimeout(reconnectTimer);
+      connect();
+    });
+
     return () => {
+      stopWatchingToken();
       closedByUs.current = true;
       setRealtimeSend(null);
       clearTimeout(reconnectTimer);

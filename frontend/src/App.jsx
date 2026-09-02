@@ -33,6 +33,7 @@ import InstallTimberPrompt from "./components/Install/InstallTimberPrompt.jsx";
 import { usePwaInstall } from "./hooks/usePwaInstall.js";
 import { useTheme } from "./hooks/useTheme.js";
 import Vault from "./screens/Vault/Vault.jsx";
+import SecureAccount from "./screens/Secure/SecureAccount.jsx";
 import { mobileTabSelection, notificationMobileDestination } from "./lib/mobileNavigation.js";
 import "./index.css";
 
@@ -143,6 +144,7 @@ const TABS = [
 
 function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLockPolicyChange, newAccountInstall, onInstallHandled }) {
   const [tab, setTab] = useState("chats");
+  const [secureOpen, setSecureOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState(null);
   const [vaultPage, setVaultPage] = useState("root");
@@ -151,6 +153,16 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   const [manualInstall, setManualInstall] = useState(false);
   const [incomingNotice, setIncomingNotice] = useState(null);
   const isDesktop = useIsDesktop();
+
+  // Opening a conversation is one action, so it makes one update. This used to
+  // be an Effect chained off `openConversation`, which is the "chain of
+  // computations" React warns about: an extra render pass, and a window where
+  // the component and the store disagreed about which thread was open.
+  const openConversationAt = useCallback((conversationId) => {
+    setOpenConversation(conversationId);
+    useChatStore.getState().setActiveConversation(conversationId);
+  }, []);
+
   const { unread, pendingReceived, me, levelUp, dismissLevelUp } = useChatStore();
   const { send, connected, acknowledge, subscribe } = useWebSocket(true);
   const callController = useCall(send, subscribe);
@@ -171,16 +183,28 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   }, [incomingNotice]);
 
   useEffect(() => {
+    let active = true;
     bootstrap()
       .catch(() => {
         /* offline: the local store already painted what this device knows */
       })
       .finally(() => {
+        if (!active) {
+          // Locking wipes the keys and clears the store, but `bootstrap` writes
+          // straight into that store and may still have been in flight. If the
+          // session is genuinely gone, scrub whatever landed afterwards --
+          // leaving decrypted peer names in memory is the one thing locking
+          // exists to prevent. A StrictMode remount is not that, so the check
+          // is on the session rather than on this Effect being torn down.
+          if (!isUnlocked()) useChatStore.getState().reset();
+          return;
+        }
         resumePendingCalls().catch(() => {});
         // Re-register the push endpoint if the browser rotated it while we were
         // closed; otherwise this device silently stops getting alerts forever.
         ensurePushSubscription().catch(() => {});
       });
+    return () => { active = false; };
   }, [resumePendingCalls]);
 
   // Act on a tapped notification. This is the first moment it can be done: the
@@ -205,32 +229,31 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
       const known = useChatStore.getState().conversations
         .some((entry) => entry.id === target.conversationId);
       if (!known) await reconcileRealtime().catch(() => {});
-      setOpenConversation(target.conversationId);
+      openConversationAt(target.conversationId);
       if (target.kind === "call") resumePendingCalls().catch(() => {});
     };
 
     open(consumePendingTarget());
     return subscribePendingTarget((target) => { open(target).catch(() => {}); });
-  }, [resumePendingCalls]);
+  }, [openConversationAt, resumePendingCalls]);
 
   // Acknowledging lives in Chat, chained after its history load: doing it here
   // read the local store before the backfill had written to it, so anything
   // that arrived while away was left unacknowledged until the next open.
 
-  useEffect(() => {
-    useChatStore.getState().setActiveConversation(openConversation);
-  }, [openConversation]);
-
   const installMode = manualInstall ? "manual" : newAccountInstall ? "new-account" : null;
-  const closeInstall = () => {
+  // `InstallTimberPrompt` lists `onClose` among its Effect dependencies, so a
+  // fresh function each render re-ran three storage and permission reads on
+  // every single render of the shell.
+  const closeInstall = useCallback(() => {
     setManualInstall(false);
     pwa.acknowledgeInstalled?.();
     onInstallHandled();
-  };
+  }, [onInstallHandled, pwa]);
 
   const openIncomingNotice = () => {
     if (!incomingNotice?.conversationId) return;
-    setOpenConversation(incomingNotice.conversationId);
+    openConversationAt(incomingNotice.conversationId);
     setChatsPage("list");
     setTab("chats");
     setIncomingNotice(null);
@@ -263,7 +286,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
   /** Open a chat with a friend, resolving the conversation if it is not cached. */
   const openWithFriend = async (friendId, conversationId) => {
     if (conversationId) {
-      setOpenConversation(conversationId);
+      openConversationAt(conversationId);
       setChatsPage("list");
       setTab("chats");
       return;
@@ -271,20 +294,25 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
     const conversations = await reconcileRealtime();
     const match = conversations.find((entry) => entry.peer.id === friendId);
     if (match) {
-      setOpenConversation(match.id);
+      openConversationAt(match.id);
       setChatsPage("list");
       setTab("chats");
     }
   };
 
+  const secureOverlay = secureOpen ? (
+    <SecureAccount onDone={() => setSecureOpen(false)} onCancel={() => setSecureOpen(false)} />
+  ) : null;
+
   const listPane = (
     <>
       {tab === "chats" && chatsPage === "list" && (
         <Chats
-          onOpen={setOpenConversation}
+          onOpen={openConversationAt}
           activeConversationId={isDesktop ? openConversation : null}
           onFindPeople={() => setChatsPage("people")}
           onInvite={() => setChatsPage("people")}
+          onSecureAccount={() => setSecureOpen(true)}
         />
       )}
       {tab === "chats" && chatsPage === "people" && (
@@ -330,7 +358,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
       conversationId={openConversation}
       send={send}
       onAcknowledge={acknowledge}
-      onBack={isDesktop ? null : () => setOpenConversation(null)}
+      onBack={isDesktop ? null : () => openConversationAt(null)}
       onStartCall={callController.startCall}
       call={callController.call}
     />
@@ -348,7 +376,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
             title={entry.label}
             onClick={() => {
               const selection = mobileTabSelection(entry.id);
-              if (selection.closeConversation) setOpenConversation(null);
+              if (selection.closeConversation) openConversationAt(null);
               setSettingsOpen(false);
               setSettingsTarget(null);
               if (selection.vaultPage) setVaultPage(selection.vaultPage);
@@ -385,6 +413,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
         <main className="shell-main">{listPane}</main>
         {incomingBanner}
         {nav}
+        {secureOverlay}
         {levelUpModal}
         <CallOverlay {...callController} />
         <InstallTimberPrompt open={Boolean(installMode || pwa.justInstalled)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />
@@ -414,6 +443,7 @@ function Shell({ onSignOut, onWiped, pwa, theme, onThemeChange, lockPolicy, onLo
 
       {incomingBanner}
 
+      {secureOverlay}
       {levelUpModal}
       <CallOverlay {...callController} />
       <InstallTimberPrompt open={Boolean(installMode || pwa.justInstalled)} manual={manualInstall} pwa={pwa} onClose={closeInstall} />

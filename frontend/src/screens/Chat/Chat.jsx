@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useChatStore } from "../../store/chatStore.js";
 import { currentIdentity } from "../../crypto/session.js";
-import { decryptFile, encryptFile, payloads } from "../../crypto/envelope.js";
+import { encryptFile, payloads } from "../../crypto/envelope.js";
 import { safetyFingerprint } from "../../crypto/identity.js";
 import {
   getMeta,
@@ -16,12 +16,15 @@ import {
   setMeta,
   toggleSavedMessage,
 } from "../../db/localStore.js";
-import { downloadEncrypted, uploadEncrypted, userMessage } from "../../lib/api.js";
+import { uploadEncrypted, userMessage } from "../../lib/api.js";
 import { loadConversation, loadOlder, prepareOutgoingPayload } from "../../lib/sync.js";
 import { notificationSettings, setChatNotification } from "../../lib/notifications.js";
 import { timeAgo } from "../../lib/time.js";
 import { Icons } from "../../components/Settings/icons.jsx";
 import Modal from "../../components/Modal.jsx";
+import Attachment from "../../components/Attachment/Attachment.jsx";
+import StreakFlame from "../../components/Streak/StreakFlame.jsx";
+import ReactionPicker from "../../components/Reactions/ReactionPicker.jsx";
 
 const TYPING_IDLE_MS = 1500;
 const VOICE_NOTE_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -52,17 +55,6 @@ function attachmentType(file) {
   return (file?.type ?? "").split(";", 1)[0].toLowerCase();
 }
 
-function safeDownloadName(value) {
-  const cleaned = String(value ?? "attachment")
-    .replace(/[\\/:*?"<>|]/g, "_")
-    .split("")
-    .map((character) => (character.charCodeAt(0) < 32 ? "_" : character))
-    .join("")
-    .trim()
-    .slice(0, 120);
-  return cleaned || "attachment";
-}
-
 function labelForPayload(payload) {
   if (payload?.t === "file") return payload.kind === "voice" ? "Voice note" : `Attachment: ${payload.name ?? "file"}`;
   if (payload?.t === "decision") return `${payload.kind === "poll" ? "Poll" : "Decision"}: ${payload.prompt}`;
@@ -71,7 +63,7 @@ function labelForPayload(payload) {
 }
 
 export default function Chat({ conversationId, send, onBack, onStartCall, call, onAcknowledge }) {
-  const { messages, conversations, typing, onlineUsers } = useChatStore();
+  const { messages, conversations, typing, onlineUsers, streaks } = useChatStore();
   const [text, setText] = useState("");
   const [sendError, setSendError] = useState("");
   const [safetyNumber, setSafetyNumber] = useState("");
@@ -87,6 +79,8 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
   const [recording, setRecording] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  // Which message currently has the reaction picker open, if any.
+  const [reactingTo, setReactingTo] = useState(null);
   const scrollRef = useRef(null);
   const typingTimer = useRef(null);
   const isTyping = useRef(false);
@@ -119,9 +113,19 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
     };
   }, [conversationId, onAcknowledge]);
   useEffect(() => {
-    savedMessageIds().then(setSaved).catch(() => {});
-    notificationSettings().then((settings) => setNotificationsMuted(settings.chats?.[conversationId] === "muted")).catch(() => {});
-    return () => recorder.current?.stream?.getTracks().forEach((track) => track.stop());
+    // Both reads are async, so switching conversation quickly could otherwise
+    // apply the previous thread's saved list and mute state to this one.
+    let ignore = false;
+    savedMessageIds()
+      .then((ids) => { if (!ignore) setSaved(ids); })
+      .catch(() => {});
+    notificationSettings()
+      .then((settings) => { if (!ignore) setNotificationsMuted(settings.chats?.[conversationId] === "muted"); })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+      recorder.current?.stream?.getTracks().forEach((track) => track.stop());
+    };
   }, [conversationId]);
 
   useEffect(() => {
@@ -154,12 +158,20 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
 
   useEffect(() => {
     if (!searchTerm.trim()) return undefined;
+    // Clearing the timer stops a *queued* search, but not one already running.
+    // Decryption makes these slow enough to finish out of order, so a late
+    // result for an earlier term has to be discarded as well.
+    let ignore = false;
     const timer = setTimeout(() => {
       searchMessages(searchTerm).then((all) => {
+        if (ignore) return;
         setSearchResults(all.filter((message) => message.conversationId === conversationId));
-      }).catch(() => setSearchResults([]));
+      }).catch(() => { if (!ignore) setSearchResults([]); });
     }, 180);
-    return () => clearTimeout(timer);
+    return () => {
+      ignore = true;
+      clearTimeout(timer);
+    };
   }, [searchTerm, conversationId]);
 
   const stopTyping = () => {
@@ -280,24 +292,6 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
     }
   };
 
-  const downloadAttachment = async (message) => {
-    try {
-      const { data } = await downloadEncrypted(message.payload.attachment_id);
-      const bytes = decryptFile(new Uint8Array(data), message.payload.key);
-      // Never let a peer-controlled MIME type make a decrypted blob executable
-      // or inline-renderable. The browser receives a forced download instead.
-      const blob = new Blob([bytes], { type: "application/octet-stream" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = safeDownloadName(message.payload.name);
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 0);
-    } catch {
-      setSendError("This encrypted attachment is unavailable or has expired.");
-    }
-  };
-
   const saveMessage = async (message) => {
     const isSaved = await toggleSavedMessage(message);
     setSaved((current) => {
@@ -345,7 +339,10 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
         <div className="chat-header-identity">
           {onBack && <button className="icon-btn chat-header-back" onClick={onBack} aria-label="Back">{Icons.back}</button>}
           <div className="chat-header-text">
-            <span className="chat-header-name">{conversation?.peerUsername ?? "Private contact"}</span>
+            <span className="chat-header-name">
+              {conversation?.peerUsername ?? "Private contact"}
+              <StreakFlame streak={streaks[conversation?.peerId]} />
+            </span>
             <span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : ""}</span>
           </div>
         </div>
@@ -382,18 +379,41 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
           const replied = list.find((entry) => entry.id === message.payload?.reply_to);
           return <div key={message.id} className={`bubble-row ${mine ? "bubble-row--mine" : ""}`}>
             <div className={`bubble ${mine ? "bubble--mine" : "bubble--theirs"} ${message.deleted || message.expired ? "bubble--muted" : ""}`}>
-              {message.undecryptable ? <span className="bubble-undecryptable">{message.reason === "waiting-for-key" ? "Waiting for this contact's key…" : "This message could not be decrypted."}</span> : message.deleted ? <span className="bubble-undecryptable">This message was deleted for everyone.</span> : message.expired ? <span className="bubble-undecryptable">This postcard has expired.</span> : <MessageContent message={message} replied={replied} onDownload={downloadAttachment} onVote={(value) => sendControl(payloads.decisionVote(message.id, value))} />}
+              {message.undecryptable ? <span className="bubble-undecryptable">{message.reason === "waiting-for-key" ? "Waiting for this contact's key…" : "This message could not be decrypted."}</span> : message.deleted ? <span className="bubble-undecryptable">This message was deleted for everyone.</span> : message.expired ? <span className="bubble-undecryptable">This postcard has expired.</span> : <MessageContent message={message} replied={replied} onVote={(value) => sendControl(payloads.decisionVote(message.id, value))} />}
               {message.pinned && <span className="message-pin">📌 Pinned</span>}
-              {Object.entries(message.reactions ?? {}).map(([emoji, people]) => <span className="reaction" key={emoji}>{emoji} {people.length}</span>)}
+              {Object.entries(message.reactions ?? {}).map(([emoji, people]) => {
+                const mine_ = people.includes(me);
+                return (
+                  <button
+                    className={`reaction ${mine_ ? "reaction--mine" : ""}`}
+                    key={emoji}
+                    aria-label={mine_ ? `Remove your ${emoji} reaction` : `React with ${emoji}`}
+                    aria-pressed={mine_}
+                    onClick={() => sendControl(payloads.reaction(message.id, emoji, { remove: mine_ }))}
+                  >
+                    {emoji} {people.length}
+                  </button>
+                );
+              })}
               <span className="bubble-meta">{message.payload?.scheduled_at && message.pending ? `Scheduled ${new Date(message.payload.scheduled_at).toLocaleString()} · ` : ""}{timeAgo(message.createdAt)}{mine && <Receipt message={message} />}</span>
               {!message.undecryptable && !message.deleted && !message.expired && <div className="message-tools">
                 <button onClick={() => setReplyTo(message)} aria-label="Reply">↩</button>
-                <button onClick={() => sendControl(payloads.reaction(message.id, "❤️"))} aria-label="React with heart">♥</button>
+                <button onClick={() => setReactingTo(message.id)} aria-label="Add a reaction" aria-haspopup="menu">☺</button>
                 <button onClick={() => saveMessage(message)} aria-label="Save message">{saved.has(message.id) ? "★" : "☆"}</button>
                 <button onClick={() => sendControl(payloads.pin(message.id, !message.pinned))} aria-label="Toggle shared pin">📌</button>
                 {mine && message.payload?.t === "text" && <button onClick={() => { const body = window.prompt("Edit message", message.payload.body); if (body?.trim()) sendControl(payloads.edit(message.id, body.trim())); }} aria-label="Edit message">✎</button>}
                 {mine && <button onClick={() => window.confirm("Delete this for everyone?") && sendControl(payloads.delete(message.id))} aria-label="Delete for everyone">×</button>}
               </div>}
+              {reactingTo === message.id && (
+                <ReactionPicker
+                  onClose={() => setReactingTo(null)}
+                  onPick={(emoji) => {
+                    const held = (message.reactions?.[emoji] ?? []).includes(me);
+                    sendControl(payloads.reaction(message.id, emoji, { remove: held }));
+                    setReactingTo(null);
+                  }}
+                />
+              )}
             </div>
           </div>;
         })}
@@ -465,10 +485,10 @@ function Receipt({ message }) {
   );
 }
 
-function MessageContent({ message, replied, onDownload, onVote }) {
+function MessageContent({ message, replied, onVote }) {
   const payload = message.payload ?? {};
-  if (payload.reply_to) return <><span className="reply-quote">↩ {replied ? labelForPayload(replied.payload).slice(0, 70) : "Reply"}</span><MessageContent message={{ ...message, payload: { ...payload, reply_to: null } }} replied={null} onDownload={onDownload} onVote={onVote} /></>;
-  if (payload.t === "file") return <button className="attachment-card" onClick={() => onDownload(message)}>{payload.kind === "voice" ? "🎙" : "📎"} {payload.name ?? "Encrypted attachment"}{payload.kind === "voice" && payload.duration_ms ? ` · ${Math.ceil(payload.duration_ms / 1000)}s` : ""}</button>;
+  if (payload.reply_to) return <><span className="reply-quote">↩ {replied ? labelForPayload(replied.payload).slice(0, 70) : "Reply"}</span><MessageContent message={{ ...message, payload: { ...payload, reply_to: null } }} replied={null} onVote={onVote} /></>;
+  if (payload.t === "file") return <Attachment payload={payload} />;
   if (payload.t === "decision") return <div className="decision-card"><strong>{payload.kind === "poll" ? "Poll" : "Decision"}</strong><span>{payload.prompt}</span>{payload.options?.length > 0 && <div className="decision-options">{payload.options.map((option) => <button key={option} onClick={() => onVote(option)}>{option} {Object.values(message.votes ?? {}).filter((vote) => vote === option).length || ""}</button>)}</div>}</div>;
   if (payload.t === "call") return <CallCard payload={payload} />;
   return <span className="bubble-body">{payload.body}</span>;

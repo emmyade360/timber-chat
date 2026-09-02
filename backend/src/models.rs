@@ -87,8 +87,9 @@ pub struct SelfProfile {
     pub is_online: bool,
     pub last_seen: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
-    /// A non-medical reflection of steady, consent-based connection. It never
-    /// represents message content, health, popularity, or time spent online.
+    /// Progression earned from check-ins, messages sent, streaks, friendships
+    /// and referrals -- each capped daily so the total cannot be farmed. It
+    /// never represents message content, and it is not a health score.
     pub growth_points: i64,
     pub level: i16,
     pub level_name: &'static str,

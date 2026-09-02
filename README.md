@@ -11,9 +11,10 @@ A private, non-custodial direct-message app.
   keeps a sealed copy so messages survive being offline and reach a restored device.
 - **Direct messages only.** You claim a username, add people as friends, and only two
   people who have accepted each other can exchange messages.
-- **A 21-stage growth path** from Seed to Living Grove, earned through bounded,
-  consent-based connection practices — never message volume, popularity, time online,
-  referral counts, or message content.
+- **A 21-stage growth path** from Carbon to Koh-i-Noor, earned by using the app:
+  checking in, talking to people, keeping streaks alive, adding friends, and inviting
+  others. Every source is capped per day so a score cannot be farmed, and none of it
+  ever reads message content.
 
 ## How the encryption fits together
 
@@ -132,9 +133,27 @@ existing friends and conversations.
 
 ## Growth
 
-Growth is a non-medical reflection of steady, consent-based connection. Daily practices
-are capped and are never awarded for message quantity, time online, presence, popularity,
-or referrals. It is not a health score.
+Growth is a progression score, not a measure of anyone's health or worth.
+
+It is earned from a daily check-in, a rhythm bonus for returning, sending messages,
+keeping per-friendship streaks alive, mutually accepted friendships, and referrals.
+An engaged day is worth about 350 points and the top stage is 13,800, so the path is
+one to two months of heavy use rather than the year the first version required.
+
+**This is a deliberate reversal.** Growth was originally built to resist engagement
+loops — 44 points a day, and explicitly nothing for message volume, popularity, or
+referral counts. That stance was traded for conventional engagement mechanics. Two
+properties were kept because they are correctness rather than philosophy:
+
+- **Every source is capped per day.** Not for pacing, but because a leaderboard turns
+  any uncapped source into something worth scripting. A referral credit is exactly-once
+  per invited account, enforced by a primary key.
+- **The relay still never reads message content.** Points are awarded for the fact that
+  an envelope was sent, never for anything inside it.
+
+Streaks are per friendship and advance only on a day both people send something. The
+leaderboard is **opt-in**: growth points were private before it existed, and ranking
+accounts against each other discloses them.
 
 ## Running it
 

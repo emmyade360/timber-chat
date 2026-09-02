@@ -4,14 +4,19 @@
 // derived from the recovery phrase, and exchange the signature for a session token.
 // No password is ever chosen, transmitted, or stored.
 
-import api, { apiError, setSessionRefresher, setToken } from "./api.js";
+import api, { WAKE_TIMEOUT_MS, apiError, setSessionRefresher, setToken } from "./api.js";
 import { base64ToBytes } from "../crypto/bytes.js";
 import { publicIdentity, signChallenge, signKexKeyBinding } from "../crypto/identity.js";
 import { currentIdentity, isUnlocked } from "../crypto/session.js";
 
 async function challenge(identity) {
   const pub = publicIdentity(identity);
-  const { data } = await api.post("/auth/challenge", { identity_pk: pub.identity_pk });
+  const { data } = await api.post(
+    "/auth/challenge",
+    { identity_pk: pub.identity_pk },
+    // First contact: this is the request that pays for a cold start.
+    { timeout: WAKE_TIMEOUT_MS },
+  );
   return { pub, nonce: data.nonce, registered: data.registered };
 }
 
@@ -30,7 +35,7 @@ export async function signIn(identity) {
     const { data } = await api.post("/auth/login", {
       identity_pk: pub.identity_pk,
       signature: signChallenge(identity, base64ToBytes(nonce)),
-    });
+    }, { timeout: WAKE_TIMEOUT_MS });
     setToken(data.token);
     // Accounts created before key attestation are repaired only with a
     // signature made by the recovery phrase; the server cannot choose a key.
@@ -54,7 +59,7 @@ export async function register(identity, username, inviteCode = null) {
       username,
       signature: signChallenge(identity, base64ToBytes(nonce)),
       invite_code: inviteCode,
-    });
+    }, { timeout: WAKE_TIMEOUT_MS });
     setToken(data.token);
     return data;
   } catch (error) {

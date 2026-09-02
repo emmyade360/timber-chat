@@ -25,12 +25,53 @@ import { base64ToBytes, bytesToBase64, bytesToUtf8, randomBytes, utf8ToBytes } f
 import { conversationKey, open as openEnvelope, seal } from "../crypto/envelope.js";
 import { currentIdentity } from "../crypto/session.js";
 import { verifyKexKeyBinding } from "../crypto/identity.js";
+import type { SealedLocal } from "../types/db.js";
+import type { Conversation, ConversationPatch } from "../types/conversation.js";
+import type {
+  ConversationMessage,
+  MessagePayload,
+  PresentedMessage,
+  SealedEnvelope,
+  StoredFlag,
+  StoredMessage,
+} from "../types/message.js";
+
+
+/** A peer as the relay publishes it, before it is verified and cached. */
+export interface PeerProfile {
+  id: string;
+  username: string;
+  level?: number;
+  level_name?: string;
+  identity_pk: string;
+  kex_pk: string;
+  kex_key_signature: string;
+}
+
+/** A message on its way into storage. `pending`/`seen` are still booleans here. */
+interface IncomingMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  createdAt: number;
+  envelope: SealedEnvelope;
+  pending?: boolean;
+  seen?: boolean | StoredFlag;
+  deliveredAck?: boolean | StoredFlag;
+  readAck?: boolean | StoredFlag;
+  deliveredAt?: number | null;
+  readAt?: number | null;
+}
+
+/** The two receipt columns a sweep can stamp. */
+type ReceiptField = "deliveredAt" | "readAt";
+type AckField = "deliveredAck" | "readAck";
 
 const NONCE_BYTES = 24;
 const MAX_CALL_SIGNAL_CIPHERTEXT_BYTES = 48 * 1024;
 
 /** Seal an arbitrary value under the device key, for metadata at rest. */
-function sealLocal(value) {
+function sealLocal(value: unknown): SealedLocal {
   const { localDbKey } = currentIdentity();
   const nonce = randomBytes(NONCE_BYTES);
   const ciphertext = xchacha20poly1305(localDbKey, nonce).encrypt(
@@ -39,19 +80,28 @@ function sealLocal(value) {
   return { n: bytesToBase64(nonce), c: bytesToBase64(ciphertext) };
 }
 
-function openLocal(sealed) {
+/**
+ * Unseal a local record. Generic because the caller is the only thing that
+ * knows what it put in -- the ciphertext carries no shape of its own.
+ */
+function openLocal<T>(sealed: SealedLocal | null | undefined): T | null {
   if (!sealed) return null;
   const { localDbKey } = currentIdentity();
   const plaintext = xchacha20poly1305(localDbKey, base64ToBytes(sealed.n)).decrypt(
     base64ToBytes(sealed.c),
   );
-  return JSON.parse(bytesToUtf8(plaintext));
+  return JSON.parse(bytesToUtf8(plaintext)) as T;
 }
 
 // --- peers -----------------------------------------------------------------
 
 export class PeerKeyVerificationError extends Error {
-  constructor(message = "This contact's identity key could not be verified. Messaging is blocked to protect your conversation.", retainExisting = false) {
+  readonly retainExisting: boolean;
+
+  constructor(
+    message = "This contact's identity key could not be verified. Messaging is blocked to protect your conversation.",
+    retainExisting = false,
+  ) {
     super(message);
     this.name = "PeerKeyVerificationError";
     this.retainExisting = retainExisting;
@@ -59,7 +109,7 @@ export class PeerKeyVerificationError extends Error {
 }
 
 /** Cache a peer's profile and public keys so chats render while offline. */
-export async function putPeer(peer) {
+export async function putPeer(peer: PeerProfile): Promise<void> {
   if (!verifyKexKeyBinding({
     userId: peer.id,
     identityPk: peer.identity_pk,
@@ -71,8 +121,8 @@ export async function putPeer(peer) {
   const db = await timberDb();
   const existing = await db.get(STORE_PEERS, peer.id);
   if (existing) {
-    const trusted = openLocal(existing.data);
-    if (trusted.identity_pk !== peer.identity_pk || trusted.kex_pk !== peer.kex_pk) {
+    const trusted = openLocal<PeerProfile>(existing.data);
+    if (trusted && (trusted.identity_pk !== peer.identity_pk || trusted.kex_pk !== peer.kex_pk)) {
       throw new PeerKeyVerificationError(
         "This contact's identity key changed unexpectedly. Compare safety numbers before messaging again.",
         true,
@@ -82,29 +132,34 @@ export async function putPeer(peer) {
   await db.put(STORE_PEERS, { id: peer.id, data: sealLocal(peer) });
 }
 
-export async function getPeer(userId) {
+export async function getPeer(userId: string): Promise<PeerProfile | null> {
   const db = await timberDb();
   const record = await db.get(STORE_PEERS, userId);
-  return record ? openLocal(record.data) : null;
+  return record ? openLocal<PeerProfile>(record.data) : null;
 }
 
 /** Remove any stale or untrusted peer key before it can be used for ECDH. */
-export async function deletePeer(userId) {
+export async function deletePeer(userId: string): Promise<void> {
   const db = await timberDb();
   await db.delete(STORE_PEERS, userId);
 }
 
-export async function allPeers() {
+export async function allPeers(): Promise<PeerProfile[]> {
   const db = await timberDb();
-  return (await db.getAll(STORE_PEERS)).map((record) => openLocal(record.data));
+  return (await db.getAll(STORE_PEERS))
+    .map((record) => openLocal<PeerProfile>(record.data))
+    .filter((peer): peer is PeerProfile => peer !== null);
 }
 
 // --- conversations ---------------------------------------------------------
 
-export async function upsertConversation(conversation) {
+export async function upsertConversation(conversation: ConversationPatch): Promise<ConversationPatch> {
   const db = await timberDb();
   const existing = await db.get(STORE_CONVERSATIONS, conversation.id);
-  const merged = { ...(existing ? openLocal(existing.data) : {}), ...conversation };
+  const merged: ConversationPatch = {
+    ...(existing ? openLocal<ConversationPatch>(existing.data) : null),
+    ...conversation,
+  };
   await db.put(STORE_CONVERSATIONS, {
     id: conversation.id,
     updatedAt: conversation.updatedAt ?? existing?.updatedAt ?? 0,
@@ -113,22 +168,23 @@ export async function upsertConversation(conversation) {
   return merged;
 }
 
-export async function getConversation(conversationId) {
+export async function getConversation(conversationId: string): Promise<Conversation | null> {
   const db = await timberDb();
   const record = await db.get(STORE_CONVERSATIONS, conversationId);
-  return record ? openLocal(record.data) : null;
+  return record ? openLocal<Conversation>(record.data) : null;
 }
 
 /** Conversations most-recently-active first, the order the Chats tab renders. */
-export async function listConversations() {
+export async function listConversations(): Promise<Conversation[]> {
   const db = await timberDb();
   const records = await db.getAll(STORE_CONVERSATIONS);
   return records
     .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    .map((record) => openLocal(record.data));
+    .map((record) => openLocal<Conversation>(record.data))
+    .filter((conversation): conversation is Conversation => conversation !== null);
 }
 
-export async function touchConversation(conversationId, updatedAt) {
+export async function touchConversation(conversationId: string, updatedAt: number): Promise<void> {
   const db = await timberDb();
   const record = await db.get(STORE_CONVERSATIONS, conversationId);
   if (record && (record.updatedAt ?? 0) < updatedAt) {
@@ -137,7 +193,7 @@ export async function touchConversation(conversationId, updatedAt) {
 }
 
 /** Remove a conversation and its local ciphertext when the friendship is removed. */
-export async function deleteConversation(conversationId, peerId = null) {
+export async function deleteConversation(conversationId: string, peerId: string | null = null): Promise<void> {
   const db = await timberDb();
   const tx = db.transaction([STORE_CONVERSATIONS, STORE_MESSAGES, STORE_PEERS], "readwrite");
   const messages = tx.objectStore(STORE_MESSAGES);
@@ -162,7 +218,7 @@ export async function deleteConversation(conversationId, peerId = null) {
  * Returns null when the peer's public key has not been fetched yet, which is
  * what lets callers show "waiting to sync" instead of failing outright.
  */
-export async function keyForConversation(conversationId) {
+export async function keyForConversation(conversationId: string): Promise<Uint8Array | null> {
   const identity = currentIdentity();
   const conversation = await getConversation(conversationId);
   if (!conversation || conversation.securityError) return null;
@@ -180,7 +236,7 @@ export async function keyForConversation(conversationId) {
 
 /** Seal transient WebRTC signalling with the same conversation key as chat.
  * Unlike messages, these envelopes are never written to IndexedDB. */
-export async function sealCallSignal(conversationId, payload) {
+export async function sealCallSignal(conversationId: string, payload: MessagePayload): Promise<SealedEnvelope> {
   const identity = currentIdentity();
   const key = await keyForConversation(conversationId);
   if (!key) throw new Error("This conversation is not ready for a secure call.");
@@ -194,7 +250,11 @@ export async function sealCallSignal(conversationId, payload) {
 }
 
 /** Open a short-lived encrypted SDP or ICE signal delivered by the relay. */
-export async function openCallSignal(conversationId, senderId, envelope) {
+export async function openCallSignal(
+  conversationId: string,
+  senderId: string,
+  envelope: SealedEnvelope,
+): Promise<MessagePayload> {
   const key = await keyForConversation(conversationId);
   if (!key) throw new Error("This conversation is not ready for a secure call.");
   return openEnvelope({ key, conversationId, senderId, envelope });
@@ -203,14 +263,14 @@ export async function openCallSignal(conversationId, senderId, envelope) {
 // --- messages --------------------------------------------------------------
 
 /** IndexedDB indexes cannot key on booleans, so flags are stored as 0/1. */
-const flag = (value) => (value ? 1 : 0);
+const flag = (value: unknown): StoredFlag => (value ? 1 : 0);
 
 /**
  * Receipts that arrived before their message was stored, keyed by message id.
  * Drained by `putMessage`. Bounded by the fact that every entry is for a message
  * the relay has already echoed, so one is always on its way.
  */
-const deferredReceipts = new Map();
+const deferredReceipts = new Map<string, Partial<Record<ReceiptField, number>>>();
 
 /**
  * Persist a sealed message.
@@ -219,10 +279,10 @@ const deferredReceipts = new Map();
  * acknowledged; the outbox retries these on reconnect. IndexedDB indexes cannot
  * key on booleans, so it is stored as 0/1.
  */
-export async function putMessage(message) {
+export async function putMessage(message: IncomingMessage): Promise<StoredMessage> {
   const db = await timberDb();
   const existing = await db.get(STORE_MESSAGES, message.id);
-  const record = {
+  const record: StoredMessage = {
     id: message.id,
     conversationId: message.conversationId,
     senderId: message.senderId,
@@ -248,8 +308,9 @@ export async function putMessage(message) {
   const deferred = deferredReceipts.get(message.id);
   if (deferred) {
     deferredReceipts.delete(message.id);
-    for (const [field, at] of Object.entries(deferred)) {
-      if (!record[field]) record[field] = at;
+    for (const field of ["deliveredAt", "readAt"] as const) {
+      const at = deferred[field];
+      if (at !== undefined && !record[field]) record[field] = at;
     }
     if (record.readAt && !record.deliveredAt) record.deliveredAt = record.readAt;
   }
@@ -260,13 +321,13 @@ export async function putMessage(message) {
 }
 
 /** Replace an optimistic message once the server assigns its real id. */
-export async function confirmMessage(temporaryId, confirmed) {
+export async function confirmMessage(temporaryId: string, confirmed: IncomingMessage): Promise<StoredMessage> {
   const db = await timberDb();
   await db.delete(STORE_MESSAGES, temporaryId);
   return putMessage({ ...confirmed, pending: false });
 }
 
-export async function getMessage(messageId) {
+export async function getMessage(messageId: string): Promise<StoredMessage | undefined> {
   const db = await timberDb();
   return db.get(STORE_MESSAGES, messageId);
 }
@@ -278,7 +339,10 @@ export async function getMessage(messageId) {
  * ciphertext. A row that fails to open is surfaced as `undecryptable` instead of
  * being dropped, so tampering or a key mismatch is visible rather than silent.
  */
-export async function messagesFor(conversationId, { before = null, limit = 50 } = {}) {
+export async function messagesFor(
+  conversationId: string,
+  { before = null, limit = 50 }: { before?: number | null; limit?: number } = {},
+): Promise<ConversationMessage[]> {
   const db = await timberDb();
   const upper = before ?? Number.MAX_SAFE_INTEGER;
   const range = IDBKeyRange.bound(
@@ -306,79 +370,113 @@ export async function messagesFor(conversationId, { before = null, limit = 50 } 
  * opaque messages; edits, retractions, reactions, pins, votes, and expiry are
  * interpreted only after the conversation key has opened each envelope.
  */
-export function presentMessages(messages, now = Date.now()) {
-  const visible = new Map();
-  const order = [];
+export function presentMessages(messages: ConversationMessage[], now: number = Date.now()): ConversationMessage[] {
+  const visible = new Map<string, ConversationMessage>();
+  const order: string[] = [];
+
+  /** The message a control payload refers to, if it is still visible. */
+  const targetOf = (id: string): PresentedMessage | null => {
+    const original = visible.get(id);
+    return original && !original.undecryptable ? original : null;
+  };
+
   for (const message of messages) {
     if (message.undecryptable) {
       visible.set(message.id, message);
       order.push(message.id);
       continue;
     }
-    const payload = message.payload ?? {};
-    const target = payload.message_id ?? payload.decision_id;
+    const payload = message.payload;
+
     if (payload.t === "reaction") {
-      const original = visible.get(target);
-      if (original && !original.undecryptable) {
-        const reactions = { ...(original.reactions ?? {}) };
+      const original = targetOf(payload.message_id);
+      if (original) {
+        const reactions = { ...original.reactions };
         const people = new Set(reactions[payload.emoji] ?? []);
-        people.add(message.senderId);
-        original.reactions = { ...reactions, [payload.emoji]: [...people] };
+        if (payload.remove) people.delete(message.senderId);
+        else people.add(message.senderId);
+        // An emoji nobody holds any more must disappear rather than linger as
+        // an empty chip with a count of zero.
+        if (people.size) reactions[payload.emoji] = [...people];
+        else delete reactions[payload.emoji];
+        original.reactions = reactions;
       }
       continue;
     }
+
     if (payload.t === "edit" || payload.t === "delete" || payload.t === "pin") {
-      const original = visible.get(target);
-      if (original && !original.undecryptable) {
+      const original = targetOf(payload.message_id);
+      if (original) {
         // Only an author can alter or retract their own message. Pins are a
         // mutual conversation feature, so either participant may add/remove one.
-        if (payload.t === "edit" && original.senderId === message.senderId && typeof payload.body === "string") {
+        const byAuthor = original.senderId === message.senderId;
+        if (payload.t === "edit" && byAuthor && original.payload.t === "text") {
           original.payload = { ...original.payload, body: payload.body, edited: true };
         }
-        if (payload.t === "delete" && original.senderId === message.senderId) {
+        if (payload.t === "delete" && byAuthor) {
           original.deleted = true;
-          original.payload = { ...original.payload, body: "" };
+          // Blanking the body is not cosmetic: the chat-list preview reads it,
+          // so leaving it would show retracted text in the list forever.
+          original.payload = blankBody(original.payload);
         }
-        if (payload.t === "pin") original.pinned = Boolean(payload.pinned);
+        if (payload.t === "pin") original.pinned = payload.pinned;
       }
       continue;
     }
+
     if (payload.t === "decision_vote") {
-      const original = visible.get(target);
-      if (original && original.payload?.t === "decision") {
-        const votes = { ...(original.votes ?? {}) };
-        votes[message.senderId] = payload.value;
-        original.votes = votes;
+      const original = targetOf(payload.decision_id);
+      if (original?.payload.t === "decision") {
+        original.votes = { ...original.votes, [message.senderId]: payload.value };
       }
       continue;
     }
+
     if (payload.t === "call_update") {
-      const original = [...visible.values()].find((entry) => (
-        entry.payload?.t === "call" && entry.payload.call_id === payload.call_id
+      const card = [...visible.values()].find((entry): entry is PresentedMessage => (
+        !entry.undecryptable
+        && entry.payload.t === "call"
+        && entry.payload.call_id === payload.call_id
       ));
       // A call card has one author: the person who placed the call. The peer can
       // signal its outcome, but cannot forge or rewrite the encrypted history.
-      if (original && original.senderId === message.senderId) {
-        original.payload = {
-          ...original.payload,
+      if (card && card.senderId === message.senderId && card.payload.t === "call") {
+        card.payload = {
+          ...card.payload,
           status: payload.status,
-          ...(Number.isFinite(payload.duration_ms) ? { duration_ms: payload.duration_ms } : {}),
+          ...(payload.duration_ms !== undefined && Number.isFinite(payload.duration_ms)
+            ? { duration_ms: payload.duration_ms }
+            : {}),
         };
       }
       continue;
     }
-    const entry = { ...message, payload: { ...payload } };
-    if (payload.expires_at && new Date(payload.expires_at).getTime() <= now) {
+
+    const entry: PresentedMessage = { ...message, payload: { ...payload } };
+    const expiresAt = "expires_at" in payload ? payload.expires_at : undefined;
+    if (expiresAt && new Date(expiresAt).getTime() <= now) {
       entry.expired = true;
-      entry.payload = { ...entry.payload, body: "" };
+      entry.payload = blankBody(entry.payload);
     }
     visible.set(message.id, entry);
     order.push(message.id);
   }
-  return order.map((id) => visible.get(id)).filter(Boolean);
+
+  return order
+    .map((id) => visible.get(id))
+    .filter((message): message is ConversationMessage => message !== undefined);
 }
 
-function decryptRecord(record, conversationId, key) {
+/**
+ * Clear the readable text of a payload that has any, leaving other payload
+ * kinds untouched. Used for retraction and expiry, both of which must stop the
+ * text reaching the chat-list preview as well as the thread.
+ */
+function blankBody(payload: MessagePayload): MessagePayload {
+  return "body" in payload ? { ...payload, body: "" } : payload;
+}
+
+function decryptRecord(record: StoredMessage, conversationId: string, key: Uint8Array | null): ConversationMessage {
   const base = {
     id: record.id,
     conversationId: record.conversationId,
@@ -403,13 +501,18 @@ function decryptRecord(record, conversationId, key) {
 }
 
 /** The newest message in a conversation, for the chat list preview. */
-export async function lastMessage(conversationId) {
+export async function lastMessage(conversationId: string): Promise<ConversationMessage | null> {
   const [message] = await messagesFor(conversationId, { limit: 1 });
   return message ?? null;
 }
 
 /** Seal and store a message this device is sending. */
-export async function composeMessage({ conversationId, payload, id, createdAt = Date.now() }) {
+export async function composeMessage({ conversationId, payload, id, createdAt = Date.now() }: {
+  conversationId: string;
+  payload: MessagePayload;
+  id: string;
+  createdAt?: number;
+}): Promise<SealedEnvelope> {
   const identity = currentIdentity();
   const key = await keyForConversation(conversationId);
   if (!key) throw new Error("This conversation is not ready to send yet.");
@@ -426,13 +529,12 @@ export async function composeMessage({ conversationId, payload, id, createdAt = 
     senderId: identity.userId,
     createdAt,
     pending: true,
-    read: true,
     envelope,
   });
   return envelope;
 }
 
-export async function unreadCount(conversationId) {
+export async function unreadCount(conversationId: string): Promise<number> {
   const db = await timberDb();
   const identity = currentIdentity();
   const range = IDBKeyRange.bound(
@@ -456,7 +558,7 @@ export async function unreadCount(conversationId) {
  * that can fail, and conflating the two is what made a dropped read receipt
  * unrecoverable.
  */
-export async function markSeen(conversationId, selfId) {
+export async function markSeen(conversationId: string, selfId: string): Promise<string[]> {
   const db = await timberDb();
   const tx = db.transaction(STORE_MESSAGES, "readwrite");
   const range = IDBKeyRange.bound(
@@ -483,10 +585,14 @@ export async function markSeen(conversationId, selfId) {
  * message read backfills delivery too: a receipt pair that arrived out of
  * order must never leave a message showing three ticks with no second state.
  */
-export async function markReceipt(messageIds, field, at = Date.now()) {
+export async function markReceipt(
+  messageIds: Iterable<string>,
+  field: ReceiptField,
+  at: number = Date.now(),
+): Promise<string[]> {
   const db = await timberDb();
   const tx = db.transaction(STORE_MESSAGES, "readwrite");
-  const changed = [];
+  const changed: string[] = [];
   for (const id of messageIds) {
     const record = await tx.store.get(id);
     if (!record) {
@@ -512,13 +618,19 @@ export async function markReceipt(messageIds, field, at = Date.now()) {
  * device that was offline, where messages were stored by a backfill and there
  * was never a moment to acknowledge them one at a time.
  */
-async function unsentReceiptIds(conversationId, selfId, field, extra, limit) {
+async function unsentReceiptIds(
+  conversationId: string,
+  selfId: string,
+  field: AckField,
+  extra: ((record: StoredMessage) => boolean) | null,
+  limit: number,
+): Promise<string[]> {
   const db = await timberDb();
   const range = IDBKeyRange.bound(
     [conversationId, Number.MIN_SAFE_INTEGER],
     [conversationId, Number.MAX_SAFE_INTEGER],
   );
-  const ids = [];
+  const ids: string[] = [];
   let cursor = await db.transaction(STORE_MESSAGES).store.index("byConversation").openCursor(range);
   while (cursor && ids.length < limit) {
     const record = cursor.value;
@@ -536,16 +648,16 @@ async function unsentReceiptIds(conversationId, selfId, field, extra, limit) {
 }
 
 /** Messages we hold but have not confirmed delivery of. */
-export function unacknowledgedMessageIds(conversationId, selfId, limit = 500) {
+export function unacknowledgedMessageIds(conversationId: string, selfId: string, limit = 500): Promise<string[]> {
   return unsentReceiptIds(conversationId, selfId, "deliveredAck", null, limit);
 }
 
 /** Messages the user has opened but whose sender has not been told. */
-export function unreadAckedMessageIds(conversationId, selfId, limit = 500) {
+export function unreadAckedMessageIds(conversationId: string, selfId: string, limit = 500): Promise<string[]> {
   return unsentReceiptIds(conversationId, selfId, "readAck", (record) => record.seen === 1, limit);
 }
 
-async function markAck(messageIds, field) {
+async function markAck(messageIds: string[], field: AckField): Promise<void> {
   if (!messageIds.length) return;
   const db = await timberDb();
   const tx = db.transaction(STORE_MESSAGES, "readwrite");
@@ -557,13 +669,13 @@ async function markAck(messageIds, field) {
 }
 
 /** Remember that the relay took our delivery receipt, so we stop resending. */
-export const markDeliveredAck = (messageIds) => markAck(messageIds, "deliveredAck");
+export const markDeliveredAck = (messageIds: string[]) => markAck(messageIds, "deliveredAck");
 
 /** Remember that the relay took our read receipt. */
-export const markReadAck = (messageIds) => markAck(messageIds, "readAck");
+export const markReadAck = (messageIds: string[]) => markAck(messageIds, "readAck");
 
 /** Messages awaiting delivery, oldest first, for the reconnect outbox. */
-export async function pendingMessages() {
+export async function pendingMessages(): Promise<StoredMessage[]> {
   const db = await timberDb();
   const records = await db.getAllFromIndex(STORE_MESSAGES, "byPending", 1);
   return records.sort((a, b) => a.createdAt - b.createdAt);
@@ -571,9 +683,15 @@ export async function pendingMessages() {
 
 const SAVED_MESSAGES_META_KEY = "saved-messages";
 
+/** One entry in the device-local saved-message list. */
+interface SavedEntry {
+  id: string;
+  conversationId: string;
+}
+
 /** Saved messages are an encrypted, device-local list, never a server feature. */
-export async function toggleSavedMessage(message) {
-  const saved = (await getMeta(SAVED_MESSAGES_META_KEY)) ?? [];
+export async function toggleSavedMessage(message: { id: string; conversationId: string }): Promise<boolean> {
+  const saved = (await getMeta<SavedEntry[]>(SAVED_MESSAGES_META_KEY)) ?? [];
   const exists = saved.some((entry) => entry.id === message.id);
   const next = exists
     ? saved.filter((entry) => entry.id !== message.id)
@@ -582,14 +700,15 @@ export async function toggleSavedMessage(message) {
   return !exists;
 }
 
-export async function savedMessageIds() {
-  return new Set(((await getMeta(SAVED_MESSAGES_META_KEY)) ?? []).map((entry) => entry.id));
+export async function savedMessageIds(): Promise<Set<string>> {
+  const saved = (await getMeta<SavedEntry[]>(SAVED_MESSAGES_META_KEY)) ?? [];
+  return new Set(saved.map((entry) => entry.id));
 }
 
 /** Read the encrypted device-local saved-message collection on demand. */
-export async function savedMessages() {
-  const entries = (await getMeta(SAVED_MESSAGES_META_KEY)) ?? [];
-  const results = [];
+export async function savedMessages(): Promise<ConversationMessage[]> {
+  const entries = (await getMeta<SavedEntry[]>(SAVED_MESSAGES_META_KEY)) ?? [];
+  const results: ConversationMessage[] = [];
   for (const entry of entries) {
     const record = await getMessage(entry.id);
     if (!record || record.conversationId !== entry.conversationId) continue;
@@ -598,13 +717,21 @@ export async function savedMessages() {
   return results.filter((message) => !message.undecryptable).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-function searchableText(payload) {
-  if (!payload || typeof payload !== "object") return "";
-  const values = [];
-  for (const key of ["body", "name", "mime", "prompt", "kind"]) {
-    if (typeof payload[key] === "string") values.push(payload[key]);
+function searchableText(payload: MessagePayload | undefined): string {
+  if (!payload) return "";
+  // Read positionally rather than by narrowing on `t`: search deliberately
+  // spans every payload kind, and a new one should become searchable by
+  // carrying a known field, not by being added to a list here.
+  const fields = payload as Partial<Record<"body" | "name" | "mime" | "prompt" | "kind", unknown>>;
+  const values: string[] = [];
+  for (const key of ["body", "name", "mime", "prompt", "kind"] as const) {
+    const value = fields[key];
+    if (typeof value === "string") values.push(value);
   }
-  if (Array.isArray(payload.options)) values.push(...payload.options.filter((value) => typeof value === "string"));
+  const options = (payload as { options?: unknown }).options;
+  if (Array.isArray(options)) {
+    values.push(...options.filter((value): value is string => typeof value === "string"));
+  }
   return values.join(" ").toLowerCase();
 }
 
@@ -612,13 +739,16 @@ function searchableText(payload) {
  * Private, on-device full-text search. It deliberately scans encrypted rows at
  * query time instead of writing a plaintext index into IndexedDB.
  */
-export async function searchMessages(query, { limit = 100 } = {}) {
+export async function searchMessages(
+  query: string,
+  { limit = 100 }: { limit?: number } = {},
+): Promise<ConversationMessage[]> {
   const term = query.trim().toLowerCase();
   if (!term) return [];
   const db = await timberDb();
   const records = await db.getAll(STORE_MESSAGES);
-  const keys = new Map();
-  const matches = [];
+  const keys = new Map<string, Uint8Array | null>();
+  const matches: ConversationMessage[] = [];
   for (const record of records) {
     let key = keys.get(record.conversationId);
     if (key === undefined) {
@@ -633,13 +763,13 @@ export async function searchMessages(query, { limit = 100 } = {}) {
 
 // --- sync cursors ----------------------------------------------------------
 
-export async function getMeta(key) {
+export async function getMeta<T = unknown>(key: string): Promise<T | null> {
   const db = await timberDb();
   const record = await db.get(STORE_META, key);
   return record ? openLocal(record) : null;
 }
 
-export async function setMeta(key, value) {
+export async function setMeta(key: string, value: unknown): Promise<void> {
   const db = await timberDb();
   await db.put(STORE_META, sealLocal(value), key);
 }

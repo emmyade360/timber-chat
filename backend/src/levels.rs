@@ -4,9 +4,10 @@
 //! is an implementation detail for ordering; what someone is told is that they
 //! are a Cedar, and how far along that stage they are.
 //!
-//! Thresholds are cumulative connection-growth points. The curve rewards steady,
-//! bounded practice over roughly a year; it is not a score for health, popularity,
-//! message volume, or time spent in the app.
+//! Thresholds are cumulative growth points. The curve is tuned for one to two
+//! months of heavy use, and message volume, streaks and referrals all feed it --
+//! see growth.rs for the sources and the caps that keep them unfarmable. It is
+//! not a measure of health or worth.
 //!
 //! This table is the single source of truth. The frontend renders whatever
 //! authenticated `GET /api/growth` returns rather than keeping its own copy, so the two can never

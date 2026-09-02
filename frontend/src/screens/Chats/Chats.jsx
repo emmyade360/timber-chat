@@ -1,10 +1,13 @@
 // The home screen: every conversation, most recent first.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChatStore } from "../../store/chatStore.js";
+import { searchMessages } from "../../db/localStore.js";
 import { timeAgo } from "../../lib/time.js";
 import { filterConversations } from "./chatFilter.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import SecurePrompt from "../../components/Secure/SecurePrompt.jsx";
+import StreakFlame from "../../components/Streak/StreakFlame.jsx";
 import { Icons } from "../../components/Settings/icons.jsx";
 
 function previewText(preview) {
@@ -16,10 +19,35 @@ function previewText(preview) {
   return preview.payload?.body ?? "";
 }
 
-export default function Chats({ onOpen, onFindPeople, onInvite, activeConversationId = null }) {
-  const { conversations, unread, onlineUsers, syncing } = useChatStore();
+export default function Chats({ onOpen, onFindPeople, onInvite, onSecureAccount, activeConversationId = null }) {
+  const { conversations, unread, onlineUsers, syncing, streaks } = useChatStore();
   const [query, setQuery] = useState("");
+  // Results are stored with the term that produced them, so a stale answer for
+  // a term the user has already moved on from is never rendered.
+  const [found, setFound] = useState({ term: "", results: [] });
   const visibleConversations = filterConversations(conversations, query);
+  const term = query.trim();
+
+  // Search every conversation, not just the names. `searchMessages` has always
+  // read the whole encrypted store; until now the only caller threw away
+  // everything outside the thread that happened to be open.
+  useEffect(() => {
+    if (term.length < 2) return undefined;
+    // Opening each envelope is real work, so a slow result for an earlier term
+    // has to be discarded as well as cancelled.
+    let ignore = false;
+    const timer = setTimeout(() => {
+      searchMessages(term, { limit: 30 })
+        .then((results) => { if (!ignore) setFound({ term, results }); })
+        .catch(() => { if (!ignore) setFound({ term, results: [] }); });
+    }, 180);
+    return () => { ignore = true; clearTimeout(timer); };
+  }, [term]);
+
+  const matches = term.length >= 2 && found.term === term ? found.results : [];
+
+  const nameFor = (conversationId) =>
+    conversations.find((entry) => entry.id === conversationId)?.peerUsername ?? "Private contact";
 
   return (
     <div className="screen">
@@ -34,8 +62,8 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
           <input
             className="glass-input"
             type="search"
-            placeholder="Search your friends…"
-            aria-label="Search your chats by friend username"
+            placeholder="Search chats and messages…"
+            aria-label="Search your chats by friend username, or your messages by content"
             autoCapitalize="none"
             spellCheck="false"
             value={query}
@@ -43,6 +71,32 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
           />
         </div>
       </div>
+
+      <SecurePrompt conversationCount={conversations.length} onStart={onSecureAccount} />
+
+      {matches.length > 0 && (
+        <section className="chat-search-matches">
+          <h2 className="section-title">Messages ({matches.length})</h2>
+          <ul className="chat-list">
+            {matches.map((message) => (
+              <li key={message.id}>
+                <button className="chat-row" onClick={() => onOpen(message.conversationId)}>
+                  <span className="avatar">{nameFor(message.conversationId)[0]?.toUpperCase() ?? "?"}</span>
+                  <span className="chat-row-body">
+                    <span className="chat-row-top">
+                      <span className="chat-row-name">{nameFor(message.conversationId)}</span>
+                      <span className="chat-row-time">{timeAgo(message.createdAt)}</span>
+                    </span>
+                    <span className="chat-row-bottom">
+                      <span className="chat-row-preview">{previewText(message)}</span>
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {conversations.length === 0 ? (
         <div className="empty-state">
@@ -60,7 +114,7 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
             </button>
           </div>
           <p className="empty-hint">
-            Growth comes from steady, mutual connection — never invite counts.
+            Growth comes from talking to people, keeping streaks, and inviting friends.
           </p>
         </div>
       ) : visibleConversations.length === 0 ? (
@@ -94,6 +148,7 @@ export default function Chats({ onOpen, onFindPeople, onInvite, activeConversati
                       )}
                     </span>
                     <span className="chat-row-time">
+                      <StreakFlame streak={streaks[conversation.peerId]} />
                       {timeAgo(conversation.preview?.createdAt ?? conversation.updatedAt)}
                     </span>
                   </span>

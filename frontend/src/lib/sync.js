@@ -12,9 +12,12 @@ import {
   getHistory,
   getGrowth,
   getReceipts,
+  getStreaks,
   postReadReceipts,
 } from "./api.js";
 import { currentIdentity } from "../crypto/session.js";
+import { mapWithLimit } from "./concurrency.js";
+import { setVaultIdentity, vaultIdentity } from "../crypto/vault.js";
 import { payloads } from "../crypto/envelope.js";
 import {
   composeMessage,
@@ -43,6 +46,13 @@ import {
 import { useChatStore } from "../store/chatStore.js";
 
 const PAGE_SIZE = 50;
+/**
+ * How many conversations may be caught up at once after a reconnect.
+ *
+ * Browsers allow roughly six connections per host, so going much above this
+ * only queues requests inside the browser while making each one look slow.
+ */
+const RECONCILE_CONCURRENCY = 4;
 
 const toMillis = (value) => new Date(value).getTime();
 
@@ -241,16 +251,19 @@ export function reconcileRealtime() {
     do {
       reconcileQueued = false;
       conversations = await syncConversations({ reconcile: true });
-      await Promise.all(conversations.map((conversation) => backfill(conversation.id)));
+      await mapWithLimit(conversations, RECONCILE_CONCURRENCY, (conversation) =>
+        backfill(conversation.id));
       await refreshConversationList();
       await flushOutbox();
       // Once the backlog has landed: tell the senders it arrived, tell them
-      // about anything already opened, and collect what they told us.
-      await Promise.all(conversations.flatMap((conversation) => [
-        acknowledgeDelivery(conversation.id),
-        acknowledgeRead(conversation.id),
-        syncReceipts(conversation.id).catch(() => 0),
-      ]));
+      // about anything already opened, and collect what they told us. These are
+      // sequential per conversation, so one chat costs one slot rather than
+      // three -- the difference between a reconnect and a thundering herd.
+      await mapWithLimit(conversations, RECONCILE_CONCURRENCY, async (conversation) => {
+        await acknowledgeDelivery(conversation.id);
+        await acknowledgeRead(conversation.id);
+        await syncReceipts(conversation.id).catch(() => 0);
+      });
     } while (reconcileQueued);
     return conversations;
   })().finally(() => { reconciliation = null; });
@@ -332,18 +345,46 @@ export async function bootstrap() {
   try {
     await refreshConversationList(); // local first: paints immediately, works offline
 
-    const [me, growthPath, friends] = await Promise.all([
+    const [me, growthPath, friends, streaks] = await Promise.all([
       getCurrentUser(),
       getGrowth(),
       getFriends(),
+      // A missing streak list must not stop the app painting.
+      getStreaks().catch(() => ({ data: { streaks: [] } })),
     ]);
     store.setMe(me.data);
     store.setLadder(growthPath.data);
     store.setFriends(friends.data);
+    store.setStreaks(Object.fromEntries(
+      (streaks.data.streaks ?? []).map((entry) => [entry.peer_id, entry]),
+    ));
+    await refreshVaultIdentity(me.data);
 
     await reconcileRealtime();
   } finally {
     store.setSyncing(false);
+  }
+}
+
+/**
+ * Keep the lock screen's recognition card in step with the profile.
+ *
+ * Only ever refreshes a card that already exists. Turning recognition off
+ * deletes the record, and re-adding it here on the next launch would quietly
+ * undo that choice -- so an absent card is left absent.
+ */
+async function refreshVaultIdentity(me) {
+  try {
+    if (!me?.id || !(await vaultIdentity())) return;
+    await setVaultIdentity({
+      userId: me.id,
+      username: me.username,
+      avatarUrl: me.avatar_url ?? null,
+      level: me.level ?? null,
+      levelName: me.level_name ?? null,
+    });
+  } catch {
+    // Recognition is a convenience; never let it fail the app's first paint.
   }
 }
 

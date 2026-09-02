@@ -826,7 +826,7 @@ body {
 .composer-mode { flex: 0 0 auto; min-height: 44px; padding: 4px 10px; color: var(--text-muted); background: transparent; border: 1px solid var(--border); border-radius: 999px; font: inherit; font-size: 12px; cursor: pointer; }
 .composer-mode--on { color: var(--text-primary); border-color: var(--accent); background: rgba(212,137,74,.15); }
 .composer-schedule { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; color: var(--text-muted); font-size: 12px; }
-.composer-schedule input { max-width: 154px; color-scheme: dark; color: var(--text-primary); background: transparent; border: 0; font: inherit; font-size: 11px; }
+.composer-schedule input { max-width: 154px; color-scheme: dark; color: var(--text-primary); background: transparent; border: 0; font: inherit; font-size: 16px; }
 .composer-attach { flex: 0 0 auto; width: 44px; height: 44px; padding: 0; color: var(--text-primary); background: transparent; border: 1px solid var(--border); border-radius: 50%; font-size: 18px; cursor: pointer; }
 .composer-attach:disabled { opacity: .45; }
 .composer-attach--recording { color: #ffaaa1; border-color: #ffaaa1; animation: pulse 1s ease infinite; }
@@ -2147,14 +2147,18 @@ html[data-theme="light"] {
   .screen-header-back { width: 38px; height: 38px; font-family: inherit; font-size: 29px; }
   .glass-panel, .panel { background: var(--timber-card); border-color: var(--timber-line); box-shadow: none; }
   .glass-input {
-    min-height: 35px;
-    padding: 8px 13px;
+    /* 16px is a hard floor, not a preference: iOS Safari zooms the viewport
+       when a field under 16px takes focus, and leaves the layout scrolled
+       sideways afterwards. The height grows with it so the field is not
+       cramped around the larger text. */
+    min-height: 44px;
+    padding: 10px 13px;
     color: var(--timber-text);
     background: #1e1c20;
     border-color: #444047;
     border-radius: 8px;
     font-family: ui-sans-serif, system-ui, sans-serif;
-    font-size: 11px;
+    font-size: 16px;
   }
   html[data-theme="light"] .glass-input { background: #fff; }
   .field-label, .section-title { color: var(--timber-muted); }
@@ -2285,10 +2289,10 @@ html[data-theme="light"] {
   .bubble-meta { color: #d8b49b; font-family: ui-monospace, monospace; font-size: 8px; }
   .message-tools { display: none; }
   .composer { gap: 6px; padding: 7px 8px 8px; background: #151417; border-color: rgba(255,255,255,.06); }
-  .composer-input { min-height: 34px; padding-inline: 11px; background: #29272c; font-size: 10px; }
-  .composer-attach { width: 34px; height: 34px; border: 0; color: var(--timber-muted); font-size: 21px; }
+  .composer-input { min-height: 44px; padding-inline: 12px; background: #29272c; font-size: 16px; }
+  .composer-attach { width: 44px; height: 44px; border: 0; color: var(--timber-muted); font-size: 21px; }
   .composer-record { font-size: 16px; }
-  .composer-send { display: grid; width: 34px; min-height: 34px; padding: 0; place-items: center; border-radius: 50%; font-size: 16px; }
+  .composer-send { display: grid; width: 44px; min-height: 44px; padding: 0; place-items: center; border-radius: 50%; font-size: 16px; }
   .composer-options, .reply-bar { background: #171619; }
 
   /* Onboarding and unlock use the landing reference as an edge-to-edge frame. */
@@ -2340,4 +2344,357 @@ html[data-theme="light"] {
 @media (min-width: 900px) {
   .chat-header-overflow, .chat-action-sheet { display: none; }
   .chat-header-extra { display: flex; gap: 2px; }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PHASE 0 HOTFIX — desktop styling for phone-only feature classes
+
+   These 24 classes were declared only inside `@media (max-width: 899px)`, so
+   above the breakpoint the Vault, the Profile screen and the theme picker fell
+   back to User-Agent defaults -- the Vault's only control rendered as a raw
+   grey <button>. The base rules (.screen, .btn-wood, .panel) still applied, so
+   the pages had structure; what was missing was every rule that made them look
+   like Timber.
+
+   This block is deliberately temporary. Phase 4 replaces it with tokens and
+   CSS Modules and Phase 7 deletes index.css outright, so it stays contiguous
+   and uses only existing custom properties -- no new colour values, so it
+   follows whichever theme is active. Guarded by
+   src/styles/desktopCoverage.test.js.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (min-width: 900px) {
+  /* --- shared section header ------------------------------------------- */
+  .timber-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 64px;
+    padding: 18px 24px 12px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .timber-header h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .timber-header-mark,
+  .timber-header-lock {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    color: var(--accent);
+  }
+  .timber-header-lock { margin-left: auto; color: var(--text-faint); }
+  .timber-header-lock svg { width: 18px; height: 18px; }
+
+  /* --- vault ------------------------------------------------------------ */
+  .vault-screen { overflow-y: auto; }
+  .vault-intro { padding: 28px 24px 20px; }
+  .vault-eyebrow {
+    margin: 0 0 8px;
+    color: var(--text-faint);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+  .vault-intro h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .vault-intro p:not(.vault-eyebrow) {
+    margin: 10px 0 0;
+    max-width: 46ch;
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .vault-actions { display: grid; gap: 10px; padding: 0 24px 20px; max-width: 46rem; }
+  .vault-action,
+  .profile-action-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 68px;
+    padding: 12px 16px;
+    color: var(--text-primary);
+    background: var(--bg-list);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease;
+  }
+  .vault-action:hover,
+  .profile-action-row:hover { background: var(--bg-hover); border-color: var(--accent); }
+  .vault-action strong,
+  .vault-action small,
+  .profile-action-row strong,
+  .profile-action-row small { display: block; }
+  .vault-action strong,
+  .profile-action-row strong { font-size: 15px; font-weight: 600; }
+  .vault-action small,
+  .profile-action-row small { margin-top: 3px; color: var(--text-muted); font-size: 13px; }
+  .vault-action-icon {
+    display: grid;
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border-radius: var(--radius-md);
+    color: var(--accent);
+    background: var(--accent-glow);
+  }
+  .vault-action-icon svg { width: 20px; height: 20px; }
+  .vault-chevron,
+  .profile-row-chevron { margin-left: auto; color: var(--text-faint); font-size: 22px; line-height: 1; }
+  .vault-note {
+    margin: 0;
+    padding: 0 24px 28px;
+    max-width: 52ch;
+    color: var(--text-faint);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* --- profile ---------------------------------------------------------- */
+  .profile-screen { overflow-y: auto; }
+  .profile-reference-hero {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 24px 20px;
+    text-align: center;
+  }
+  .profile-reference-hero .profile-avatar {
+    width: 84px;
+    height: 84px;
+    border: 2px solid var(--accent);
+    font-size: 30px;
+  }
+  .profile-avatar-edit {
+    position: absolute;
+    top: 88px;
+    left: calc(50% + 22px);
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-primary);
+    background: var(--bg-active);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .profile-avatar-edit:hover { border-color: var(--accent); }
+  .profile-actions { display: grid; gap: 10px; padding: 0 24px 24px; max-width: 46rem; }
+  .profile-toggle {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 24px;
+    margin-left: auto;
+    padding: 3px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    cursor: pointer;
+  }
+  .profile-toggle i {
+    display: block;
+    width: 18px;
+    height: 18px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--accent-text);
+  }
+
+  /* --- theme picker ----------------------------------------------------- */
+  .theme-choice {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 8px 0;
+    padding: 14px 16px;
+    color: var(--text-primary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease;
+  }
+  .theme-choice:hover { background: var(--bg-hover); }
+  .theme-choice--active { border-color: var(--accent); background: var(--accent-glow); }
+  .theme-choice strong, .theme-choice small { display: block; }
+  .theme-choice strong { font-size: 15px; font-weight: 600; }
+  .theme-choice small { margin-top: 2px; color: var(--text-muted); font-size: 13px; }
+
+  /* --- chat controls ---------------------------------------------------- */
+  .chat-list-mark { display: grid; place-items: center; color: var(--accent); }
+  .chat-list-mark svg { width: 20px; height: 20px; }
+  .chat-list-compose { margin-left: auto; }
+  .chat-header-back { display: none; }
+  .composer-record { font-size: 18px; }
+}
+
+/* Back-up-your-account nudge, in the chat list.
+   Inline rather than floating: it is a standing task, not an alert, and it must
+   never sit on top of the conversation someone came here to read. */
+.secure-prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 12px 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  text-align: left;
+}
+.secure-prompt-mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(212, 137, 74, .2);
+  color: var(--accent);
+  font-size: 16px;
+}
+.secure-prompt-copy { display: grid; min-width: 0; gap: 2px; }
+.secure-prompt-copy strong { color: var(--text-primary); font-size: 13px; }
+.secure-prompt-copy small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.secure-prompt-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: auto;
+}
+
+@media (max-width: 520px) {
+  /* The two buttons stop fitting beside the copy long before the text does. */
+  .secure-prompt { flex-wrap: wrap; }
+  .secure-prompt-actions { flex-direction: row; width: 100%; margin-left: 0; }
+  .secure-prompt-actions button { flex: 1; }
+}
+
+/* --- Inline attachments --------------------------------------------------
+   Media is rendered in place when its bytes say that is safe; see
+   lib/mediaType.ts. Everything below is sized so a photo cannot push the
+   composer off screen on a phone. */
+.attachment-card { display: flex; align-items: center; gap: 8px; }
+.attachment-card:disabled { opacity: .6; cursor: default; }
+.attachment-card-text { display: grid; min-width: 0; gap: 1px; }
+.attachment-card-text strong { overflow: hidden; font-size: 13px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-card-text small { color: var(--text-muted); font-size: 11px; }
+.attachment-error { margin: 4px 0 0; color: var(--text-muted); font-size: 12px; }
+
+.attachment-image {
+  display: block;
+  max-width: min(280px, 68vw);
+  padding: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .15);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.attachment-image img { display: block; width: 100%; height: auto; max-height: 340px; object-fit: cover; }
+
+.attachment-video {
+  display: block;
+  max-width: min(280px, 68vw);
+  max-height: 340px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #000;
+}
+
+.attachment-audio { display: flex; align-items: center; gap: 8px; }
+.attachment-audio audio { width: min(240px, 60vw); height: 36px; }
+.attachment-duration { color: var(--text-muted); font-size: 11px; }
+
+/* --- Reactions ----------------------------------------------------------- */
+.reaction { background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.reaction--mine { border-color: var(--accent); background: rgba(212, 137, 74, .18); }
+
+.reaction-picker {
+  position: absolute;
+  z-index: 40;
+  margin-top: 4px;
+  padding: 6px;
+  background: rgba(31, 22, 16, .99);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
+}
+.reaction-picker-row { display: flex; gap: 2px; }
+.reaction-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.reaction-picker button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.reaction-picker button:hover { background: var(--bg-active); }
+.reaction-picker-more { color: var(--text-muted); font-size: 18px; }
+
+/* The bubble is the positioning context for the picker that hangs off it. */
+.bubble { position: relative; }
+
+/* --- Cross-chat message search ------------------------------------------ */
+.chat-search-matches { padding-top: 4px; }
+.chat-search-matches .section-title { padding: 6px 14px 2px; color: var(--text-muted); font-size: 12px; }
+
+/* --- Streaks -------------------------------------------------------------
+   A flame and a day count, beside a name or a timestamp. `at-risk` means both
+   people sent yesterday and only one has today, which is the state worth
+   drawing attention to. */
+.streak-flame {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.streak-flame--at-risk { color: #e0a44a; animation: streakPulse 2.4s ease-in-out infinite; }
+
+@keyframes streakPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A pulsing element beside every chat row is exactly the kind of motion this
+     setting exists to stop. */
+  .streak-flame--at-risk { animation: none; }
 }
