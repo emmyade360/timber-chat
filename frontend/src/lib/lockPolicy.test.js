@@ -4,6 +4,7 @@ import {
   LOCK_POLICIES,
   LOCK_POLICY_STORAGE_KEY,
   SESSION_LEASE_MS,
+  WEEK_LEASE_MS,
   canResumeSession,
   lockPolicyLabel,
   normalizeLockPolicy,
@@ -14,9 +15,11 @@ import {
 
 describe("auto-lock preference", () => {
   it("defaults safely to the two-hour session", () => {
-    expect(DEFAULT_LOCK_POLICY).toBe(LOCK_POLICIES.twoHours);
-    expect(readLockPolicy({ getItem: () => "invalid" })).toBe(LOCK_POLICIES.twoHours);
-    expect(normalizeLockPolicy(undefined)).toBe(LOCK_POLICIES.twoHours);
+    // A week, not two hours: the PIN costs 64 MiB of scrypt to check, so the
+    // old default made a consumer messenger pause several times a day.
+    expect(DEFAULT_LOCK_POLICY).toBe(LOCK_POLICIES.week);
+    expect(readLockPolicy({ getItem: () => "invalid" })).toBe(LOCK_POLICIES.week);
+    expect(normalizeLockPolicy(undefined)).toBe(LOCK_POLICIES.week);
   });
 
   it("persists only a non-sensitive policy value", () => {
@@ -64,5 +67,28 @@ describe("what a reload is allowed to do", () => {
       // Winding the device clock back must not hand out a fresh window.
       expect(canResumeSession(policy, unlocked, unlocked - 1)).toBe(false);
     }
+  });
+});
+
+describe("the week-long default", () => {
+  it("resumes for a week and then stops", () => {
+    const unlocked = 1_700_000_000_000;
+    const deadline = sessionDeadline(LOCK_POLICIES.week, unlocked);
+    expect(deadline).toBe(unlocked + WEEK_LEASE_MS);
+    expect(canResumeSession(LOCK_POLICIES.week, unlocked, deadline - 1)).toBe(true);
+    expect(canResumeSession(LOCK_POLICIES.week, unlocked, deadline)).toBe(false);
+  });
+
+  // Loosening the default must not loosen the strict choices with it.
+  it("leaves the stricter choices exactly as they were", () => {
+    const unlocked = 1_700_000_000_000;
+    expect(canResumeSession(LOCK_POLICIES.always, unlocked, unlocked + 1)).toBe(false);
+    expect(sessionDeadline(LOCK_POLICIES.twoHours, unlocked)).toBe(unlocked + SESSION_LEASE_MS);
+    expect(canResumeSession(LOCK_POLICIES.twoHours, unlocked, unlocked + SESSION_LEASE_MS)).toBe(false);
+  });
+
+  it("cannot be extended by putting the clock back", () => {
+    const unlocked = 1_700_000_000_000;
+    expect(canResumeSession(LOCK_POLICIES.week, unlocked, unlocked - 1)).toBe(false);
   });
 });

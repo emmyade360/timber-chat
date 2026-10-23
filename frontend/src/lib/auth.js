@@ -4,14 +4,32 @@
 // derived from the recovery phrase, and exchange the signature for a session token.
 // No password is ever chosen, transmitted, or stored.
 
-import api, { apiError, setSessionRefresher, setToken } from "./api.js";
+import api, { WAKE_TIMEOUT_MS, apiError, setSessionRefresher, setToken } from "./api.js";
 import { base64ToBytes } from "../crypto/bytes.js";
 import { publicIdentity, signChallenge, signKexKeyBinding } from "../crypto/identity.js";
 import { currentIdentity, isUnlocked } from "../crypto/session.js";
+import { setVaultPrivacy } from "../crypto/vault.js";
+import { setAccountPrivacy } from "./accountPrivacy.js";
+
+async function acceptSession(data, expectedId) {
+  if (data.user_id !== expectedId || (isUnlocked() && currentIdentity().userId !== expectedId)) {
+    throw new Error("The account changed while signing in. Reopen Timber to reconnect.");
+  }
+  setAccountPrivacy(data.is_anonymous, data.user_id);
+  setToken(data.token);
+  if (typeof data.is_anonymous === "boolean") {
+    await setVaultPrivacy(data.user_id, data.is_anonymous).catch(() => {});
+  }
+}
 
 async function challenge(identity) {
   const pub = publicIdentity(identity);
-  const { data } = await api.post("/auth/challenge", { identity_pk: pub.identity_pk });
+  const { data } = await api.post(
+    "/auth/challenge",
+    { identity_pk: pub.identity_pk },
+    // First contact: this is the request that pays for a cold start.
+    { timeout: WAKE_TIMEOUT_MS },
+  );
   return { pub, nonce: data.nonce, registered: data.registered };
 }
 
@@ -30,8 +48,8 @@ export async function signIn(identity) {
     const { data } = await api.post("/auth/login", {
       identity_pk: pub.identity_pk,
       signature: signChallenge(identity, base64ToBytes(nonce)),
-    });
-    setToken(data.token);
+    }, { timeout: WAKE_TIMEOUT_MS });
+    await acceptSession(data, identity.userId);
     // Accounts created before key attestation are repaired only with a
     // signature made by the recovery phrase; the server cannot choose a key.
     await api.post("/api/users/me/kex-key", {
@@ -45,17 +63,25 @@ export async function signIn(identity) {
 }
 
 export async function register(identity, username, inviteCode = null) {
+  return registerAt("/auth/register", identity, username, inviteCode);
+}
+
+export async function registerAnonymous(identity, username, inviteCode = null) {
+  return registerAt("/auth/register/anonymous", identity, username, inviteCode);
+}
+
+async function registerAt(path, identity, username, inviteCode) {
   try {
     const { pub, nonce } = await challenge(identity);
-    const { data } = await api.post("/auth/register", {
+    const { data } = await api.post(path, {
       identity_pk: pub.identity_pk,
       kex_pk: pub.kex_pk,
       kex_key_signature: signKexKeyBinding(identity),
       username,
       signature: signChallenge(identity, base64ToBytes(nonce)),
       invite_code: inviteCode,
-    });
-    setToken(data.token);
+    }, { timeout: WAKE_TIMEOUT_MS });
+    await acceptSession(data, identity.userId);
     return data;
   } catch (error) {
     throw apiError(error, "Could not create your account.");

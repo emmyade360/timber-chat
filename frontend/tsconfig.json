@@ -1,0 +1,19 @@
+{
+  "//": [
+    "Editor and lint entry point only. It deliberately spans everything -- app,",
+    "worker, tests and build configs -- so typescript-eslint's project service",
+    "can resolve any file in the repo.",
+    "",
+    "It is NOT the type check. `npm run typecheck` runs tsconfig.app/worker/",
+    "test/node separately, which is what keeps each environment honest about the",
+    "lib it actually runs against; this one cannot, because it has to hold them",
+    "all at once."
+  ],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "vite.config.js", "eslint.config.js"]
+}

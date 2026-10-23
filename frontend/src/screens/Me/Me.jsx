@@ -14,7 +14,23 @@ import GrowthBar from "../../components/Level/GrowthBar.jsx";
 import InvitePanel from "../../components/Invite/InvitePanel.jsx";
 import { SettingsGroup, SettingsRow, SettingsSwitch } from "../../components/Settings/SettingsList.jsx";
 import { Icons } from "../../components/Settings/icons.jsx";
-import { MAX_PIN_LENGTH, MIN_PIN_LENGTH, changePin, exportVaultTransfer, isValidPin, unlockVault, wipeDevice } from "../../crypto/vault.js";
+import {
+  MAX_PIN_LENGTH,
+  MIN_PIN_LENGTH,
+  changePin,
+  eraseOnFailureEnabled,
+  exportVaultTransfer,
+  forgetVaultIdentity,
+  isValidPin,
+  isVaultSecured,
+  openDeviceVault,
+  setEraseOnFailure,
+  setVaultIdentity,
+  unlockVault,
+  vaultIdentity,
+  wipeDevice,
+} from "../../crypto/vault.js";
+import SecureAccount from "../Secure/SecureAccount.jsx";
 import {
   clearDigest,
   notificationSettings,
@@ -29,8 +45,20 @@ import Modal from "../../components/Modal.jsx";
 
 export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignOut, onWiped, lockPolicy = LOCK_POLICIES.twoHours, onLockPolicyChange, initialPanel = null }) {
   const { me, ladder } = useChatStore();
-  const [panel, setPanel] = useState(() => ["phrase", "pin", "wipe"].includes(initialPanel) ? initialPanel : null);
-  const [page, setPage] = useState(() => initialPanel === "notifications" ? "notifications" : "root");
+  const [panel, setPanel] = useState(() => ["phrase", "pin", "wipe", "secure"].includes(initialPanel) ? initialPanel : null);
+  // Whether this device has a PIN at all. An account created since the two-tap
+  // signup has none until it is offered one, and several rows below mean
+  // different things in each state.
+  const [secured, setSecured] = useState(true);
+
+  useEffect(() => {
+    let ignore = false;
+    isVaultSecured()
+      .then((value) => { if (!ignore) setSecured(value); })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, [panel]);
+  const [page, setPage] = useState(() => ["notifications", "growth"].includes(initialPanel) ? initialPanel : "root");
 
   if (!me) return <div className="screen"><div className="empty-state">Loading…</div></div>;
 
@@ -42,7 +70,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">{Icons.back}</button>
         <h1 className="screen-title">Settings</h1>
       </header>
 
@@ -113,7 +141,13 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
         footnote="Timber has no password and no email. Your twelve-word phrase is the only way back in — keep it somewhere safe and never share it. Auto-lock defaults to two hours; turning it off keeps this device signed in until you lock it yourself, so only do that on a device only you use."
       >
         <SettingsRow icon={Icons.key} tint="amber" title="Recovery phrase" subtitle="Twelve words that are your account" onClick={() => setPanel("phrase")} />
-        <SettingsRow icon={Icons.pin} tint="wood" title="Change PIN" subtitle={`${MIN_PIN_LENGTH}–${MAX_PIN_LENGTH} digits`} onClick={() => setPanel("pin")} />
+        {secured ? (
+          <SettingsRow icon={Icons.pin} tint="wood" title="Change PIN" subtitle={`${MIN_PIN_LENGTH}+ digits`} onClick={() => setPanel("pin")} />
+        ) : (
+          <SettingsRow icon={Icons.pin} tint="amber" title="Set a PIN" subtitle="Back up your phrase and lock this device" onClick={() => setPanel("secure")} />
+        )}
+        <LockScreenName />
+        {secured && <EraseOnFailure />}
         <SettingsRow
           icon={Icons.lock}
           tint="wood"
@@ -128,6 +162,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
             >
               <option value={LOCK_POLICIES.always}>Every launch</option>
               <option value={LOCK_POLICIES.twoHours}>After 2 hours</option>
+              <option value={LOCK_POLICIES.week}>After a week</option>
               <option value={LOCK_POLICIES.never}>Never automatically</option>
             </select>
           )}
@@ -141,6 +176,9 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
         <SettingsRow icon={Icons.trash} tint="danger" title="Remove this device" subtitle="Erase this device’s copy of your account" destructive action onClick={() => setPanel("wipe")} />
       </SettingsGroup>
 
+      {panel === "secure" && (
+        <SecureAccount onDone={() => setPanel(null)} onCancel={() => setPanel(null)} />
+      )}
       {panel === "phrase" && <RevealPhrase onClose={() => setPanel(null)} />}
       {panel === "pin" && <ChangePin onClose={() => setPanel(null)} />}
       {panel === "wipe" && <WipeDevice onClose={() => setPanel(null)} onWiped={onWiped} />}
@@ -153,7 +191,7 @@ function SubPage({ title, onBack, children }) {
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="screen-header-back" onClick={onBack} aria-label="Back to settings">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to settings">{Icons.back}</button>
         <h1 className="screen-title">{title}</h1>
       </header>
       {children}
@@ -163,6 +201,11 @@ function SubPage({ title, onBack, children }) {
 
 /** The full ladder and how growth is earned. Long, so it gets its own page. */
 function GrowthPage({ me, ladder, onBack }) {
+  const chapters = [
+    { name: "Formation", eyebrow: "The first rings", from: 1, to: 5 },
+    { name: "Craft", eyebrow: "Finding your grain", from: 6, to: 13 },
+    { name: "Legend", eyebrow: "A well-worn path", from: 14, to: 21 },
+  ];
   return (
     <SubPage title="Your growth path" onBack={onBack}>
       <section className="profile-hero">
@@ -175,7 +218,7 @@ function GrowthPage({ me, ladder, onBack }) {
 
       {ladder?.practices && (
         <section className="panel">
-          <h3 className="section-title">Connection practices</h3>
+          <h3 className="section-title">What shapes your journey</h3>
           <ul className="earn-list">
             {ladder.practices.map((rule) => (
               <li key={rule.kind}>
@@ -188,28 +231,52 @@ function GrowthPage({ me, ladder, onBack }) {
             ))}
           </ul>
           <p className="panel-note">
-            Growth reflects steady, consent-based connection — never message volume,
-            time online, popularity, or anything you say. It is not a health score.
-            Daily practices are capped at {ladder.daily_growth_ceiling} growth points.
+            Growth comes from check-ins, steady return, accepted connections, message
+            activity (capped each day), streaks, and friends who join through your invite.
+            The relay never reads message contents. Growth is a participation marker,
+            not a measure of friendship or personal worth. Routine activity is capped at
+            {" "}{ladder.daily_growth_ceiling} points per day; accepted connections and
+            referrals have separate milestone caps.
           </p>
         </section>
       )}
 
       {ladder?.stages && (
-        <ol className="ladder">
-          {ladder.stages.map((tier) => {
-            const reached = me.level >= tier.level;
-            const current = me.level === tier.level;
+        <div className="adventure-path" aria-label="Growth journey stages">
+          <div className="adventure-path-intro">
+            <span className="adventure-path-kicker">The long way, together</span>
+            <p>Every stage is reached through real connection. There is no deadline.</p>
+          </div>
+          {chapters.map((chapter, chapterIndex) => {
+            const stages = ladder.stages.filter((tier) => tier.level >= chapter.from && tier.level <= chapter.to);
+            if (!stages.length) return null;
+            const active = me.level >= chapter.from && me.level <= chapter.to;
+            const complete = me.level > chapter.to;
             return (
-              <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`}>
-                <LevelBadge level={tier.level} size={30} />
-                <span className="ladder-name">{tier.name}</span>
-                <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
-                {current && <span className="ladder-you">you</span>}
-              </li>
+              <section className={`adventure-chapter ${active ? "is-active" : ""} ${complete ? "is-complete" : ""}`} key={chapter.name}>
+                <header className="adventure-chapter-head">
+                  <span className="adventure-chapter-number" aria-hidden="true">0{chapterIndex + 1}</span>
+                  <span><small>{chapter.eyebrow}</small><strong>{chapter.name}</strong></span>
+                  {active && <span className="adventure-current-label">You are here</span>}
+                </header>
+                <ol className="ladder">
+                  {stages.map((tier) => {
+                    const reached = me.level >= tier.level;
+                    const current = me.level === tier.level;
+                    return (
+                      <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`} aria-current={current ? "step" : undefined}>
+                        <span className="ladder-marker"><LevelBadge level={tier.level} size={30} /></span>
+                        <span className="ladder-name">{tier.name}</span>
+                        <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
+                        {current && <span className="ladder-you">Here</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
             );
           })}
-        </ol>
+        </div>
       )}
     </SubPage>
   );
@@ -428,11 +495,30 @@ function Stat({ label, value }) {
 }
 
 
-/** Re-asks for the PIN: the phrase is the account, so showing it needs proof. */
+/**
+ * Re-asks for the PIN: the phrase is the account, so showing it needs proof.
+ *
+ * A device with no PIN has nothing to prove with, and `unlockVault` would accept
+ * any input on one -- so the prompt is skipped rather than faked, and the phrase
+ * is shown with the offer to protect it.
+ */
 function RevealPhrase({ onClose }) {
   const [pin, setPin] = useState("");
   const [phrase, setPhrase] = useState("");
   const [error, setError] = useState("");
+  const [secured, setSecured] = useState(null);
+
+  useEffect(() => {
+    let ignore = false;
+    isVaultSecured()
+      .then(async (value) => {
+        if (ignore) return;
+        setSecured(value);
+        if (!value) setPhrase(await openDeviceVault());
+      })
+      .catch(() => { if (!ignore) setSecured(true); });
+    return () => { ignore = true; };
+  }, []);
 
   const reveal = async () => {
     try {
@@ -442,6 +528,8 @@ function RevealPhrase({ onClose }) {
       setError(caught.message);
     }
   };
+
+  if (secured === null) return null;
 
   return (
     <Modal title="Recovery phrase" onClose={onClose}>
@@ -458,6 +546,12 @@ function RevealPhrase({ onClose }) {
           <p className="onboard-warning">
             Anyone with these words has your account and can read your messages.
           </p>
+          {!secured && (
+            <p className="panel-note">
+              This device has no PIN yet. Once your phrase is written down, setting one from
+              Settings locks the copy stored here.
+            </p>
+          )}
           <button className="btn-wood btn-block" onClick={onClose}>Done</button>
         </>
       ) : (
@@ -477,6 +571,90 @@ function RevealPhrase({ onClose }) {
         </>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Whether the lock screen greets its owner by name.
+ *
+ * On means a username, avatar and growth stage sit in the clear beside the
+ * sealed vault, so the screen can recognise someone before it has any key to
+ * decrypt with. That is a real trade and it is stated plainly, because anyone
+ * holding the device learns which account it is without knowing the PIN.
+ */
+function LockScreenName() {
+  const { me } = useChatStore();
+  const [on, setOn] = useState(true);
+
+  useEffect(() => {
+    let ignore = false;
+    vaultIdentity()
+      .then((identity) => { if (!ignore) setOn(Boolean(identity?.username)); })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, []);
+
+  const toggle = async (value) => {
+    setOn(value);
+    try {
+      if (!value) await forgetVaultIdentity();
+      else if (me) {
+        await setVaultIdentity({
+          userId: me.id,
+          username: me.username,
+          avatarUrl: me.avatar_url ?? null,
+          level: me.level ?? null,
+          levelName: me.level_name ?? null,
+        });
+      }
+    } catch {
+      // A preference that cannot be written is not worth failing a screen over;
+      // the next toggle tries again.
+    }
+  };
+
+  return (
+    <SettingsRow
+      icon={Icons.profile}
+      tint="wood"
+      title="Show my name when locked"
+      subtitle={on ? "The lock screen greets you" : "The lock screen stays anonymous"}
+      control={<SettingsSwitch checked={on} onChange={toggle} label="Show my name when locked" />}
+    />
+  );
+}
+
+/**
+ * The opt-in self-destruct.
+ *
+ * Off by default since the phrase began resetting a forgotten PIN: erasing on
+ * failed attempts costs a real person their history to slow an attacker who can
+ * copy the stored blob and brute force it offline regardless.
+ */
+function EraseOnFailure() {
+  const [on, setOn] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+    eraseOnFailureEnabled()
+      .then((value) => { if (!ignore) setOn(value); })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, []);
+
+  const toggle = async (value) => {
+    setOn(value);
+    await setEraseOnFailure(value).catch(() => {});
+  };
+
+  return (
+    <SettingsRow
+      icon={Icons.trash}
+      tint="danger"
+      title="Erase after 10 failed attempts"
+      subtitle={on ? "This device erases itself; restore with your phrase" : "Wrong PINs are refused, nothing is deleted"}
+      control={<SettingsSwitch checked={on} onChange={toggle} label="Erase after 10 failed attempts" />}
+    />
   );
 }
 

@@ -17,21 +17,27 @@
 
 import { STORE_VAULT, timberDb } from "../db/timberDb.js";
 import { LOCK_POLICIES, canResumeSession, normalizeLockPolicy } from "../lib/lockPolicy.js";
+import type { LockPolicyId } from "../types/session.js";
+import { isArrayBufferBacked } from "../types/crypto.js";
+import { isResumeRecord } from "../types/db.js";
+import type { ResumeRecord } from "../types/db.js";
+import type { Bytes } from "../types/crypto.js";
+
 
 const RESUME_KEY = "resume";
 const IV_BYTES = 12;
 
-function subtle() {
+function subtle(): SubtleCrypto | null {
   return globalThis.crypto?.subtle ?? null;
 }
 
-async function put(record) {
+async function put(record: ResumeRecord): Promise<void> {
   const db = await timberDb();
   await db.put(STORE_VAULT, record, RESUME_KEY);
 }
 
 /** Drop the resume token. Every lock, and every switch to "Every launch". */
-export async function clearResume() {
+export async function clearResume(): Promise<void> {
   try {
     const db = await timberDb();
     await db.delete(STORE_VAULT, RESUME_KEY);
@@ -46,15 +52,25 @@ export async function clearResume() {
  * "Every launch" stores nothing and clears anything already stored, so choosing
  * it takes effect on the very next reload rather than at the end of a lease.
  */
-export async function sealResume(seed, policy, openedAt) {
-  if (normalizeLockPolicy(policy) === LOCK_POLICIES.always || !seed || !subtle()) {
+export async function sealResume(
+  seed: Uint8Array | null,
+  policy: LockPolicyId,
+  openedAt: number,
+): Promise<boolean> {
+  const crypt = subtle();
+  if (normalizeLockPolicy(policy) === LOCK_POLICIES.always || !seed || !crypt) {
+    await clearResume();
+    return false;
+  }
+  if (!isArrayBufferBacked(seed)) {
     await clearResume();
     return false;
   }
   try {
-    const key = await subtle().generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    const key = await crypt.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
     const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
-    const sealed = await subtle().encrypt({ name: "AES-GCM", iv }, key, seed);
+    const sealed = await crypt.encrypt({ name: "AES-GCM", iv }, key, seed);
+    if (key instanceof CryptoKey === false) throw new Error("Expected a single AES key.");
     await put({ key, iv, sealed, openedAt });
     return true;
   } catch {
@@ -72,26 +88,31 @@ export async function sealResume(seed, policy, openedAt) {
  * tightened -- is deleted here rather than merely ignored, so the window it
  * describes cannot be reopened by putting the clock back.
  */
-export async function openResume(policy, now = Date.now()) {
-  if (normalizeLockPolicy(policy) === LOCK_POLICIES.always || !subtle()) {
+export async function openResume(
+  policy: LockPolicyId,
+  now: number = Date.now(),
+): Promise<{ seed: Bytes; openedAt: number } | null> {
+  const crypt = subtle();
+  if (normalizeLockPolicy(policy) === LOCK_POLICIES.always || !crypt) {
     await clearResume();
     return null;
   }
-  let record;
+  let record: ResumeRecord | undefined;
   try {
     const db = await timberDb();
-    record = await db.get(STORE_VAULT, RESUME_KEY);
+    const stored = await db.get(STORE_VAULT, RESUME_KEY);
+    if (!isResumeRecord(stored)) return null;
+    record = stored;
   } catch {
     return null;
   }
-  if (!record?.key || !record.sealed) return null;
   if (!canResumeSession(policy, record.openedAt, now)) {
     await clearResume();
     return null;
   }
   try {
     const seed = new Uint8Array(
-      await subtle().decrypt({ name: "AES-GCM", iv: record.iv }, record.key, record.sealed),
+      await crypt.decrypt({ name: "AES-GCM", iv: record.iv }, record.key, record.sealed),
     );
     return { seed, openedAt: record.openedAt };
   } catch {

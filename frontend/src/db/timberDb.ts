@@ -7,6 +7,9 @@
 // fields are limited to the ids and timestamps the indexes need in order to query.
 
 import { openDB, deleteDB } from "idb";
+import type { IDBPDatabase } from "idb";
+import type { TimberDb } from "../types/db.js";
+import type { SealedEnvelope } from "../types/message.js";
 
 export const DB_NAME = "timber";
 // v2 split the message `read` flag into `seen` (the unread badge) and the two
@@ -19,19 +22,37 @@ export const STORE_CONVERSATIONS = "conversations";
 export const STORE_MESSAGES = "messages";
 export const STORE_PEERS = "peers";
 
-let dbPromise = null;
+/**
+ * The v1 message row. `read` did two jobs at once -- "the user has seen this"
+ * and "we have told the sender" -- which is why a read receipt that was never
+ * delivered could never be retried. Kept only for the v1 -> v2 upgrade below.
+ */
+interface LegacyMessageRecord {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  createdAt: number;
+  pending: 0 | 1;
+  read?: boolean | number;
+  acknowledged?: boolean | number;
+  deliveredAt: number | null;
+  readAt: number | null;
+  envelope: SealedEnvelope;
+}
+
+let dbPromise: Promise<IDBPDatabase<TimberDb>> | null = null;
 
 /** Set when another tab is holding the old version open; see `blocked` below. */
 let upgradeBlocked = false;
 
 /** True while a second tab is preventing the schema upgrade from completing. */
-export function isUpgradeBlocked() {
+export function isUpgradeBlocked(): boolean {
   return upgradeBlocked;
 }
 
-export function timberDb() {
+export function timberDb(): Promise<IDBPDatabase<TimberDb>> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
+    dbPromise = openDB<TimberDb>(DB_NAME, DB_VERSION, {
       upgrade(db, oldVersion, _newVersion, transaction) {
         if (!db.objectStoreNames.contains(STORE_VAULT)) {
           db.createObjectStore(STORE_VAULT);
@@ -59,10 +80,15 @@ export function timberDb() {
         // could never be retried -- the cause of messages stuck on two ticks.
         if (oldVersion >= 1 && oldVersion < 2) {
           const messages = transaction.objectStore(STORE_MESSAGES);
-          messages.openCursor().then(function migrate(cursor) {
+          void messages.openCursor().then(function migrate(cursor): Promise<undefined> | undefined {
             if (!cursor) return undefined;
-            const { read, acknowledged, ...rest } = cursor.value;
-            cursor.update({
+            // A v1 row, by definition not yet the v2 shape the schema declares.
+            const { read, acknowledged, ...rest } = cursor.value as unknown as LegacyMessageRecord;
+            // The request is queued against the upgrade transaction the moment
+            // `update` is called, so it is ordered before the `continue` below
+            // whether or not it is awaited. `void` states that rather than
+            // implying the write is unimportant.
+            void cursor.update({
               ...rest,
               seen: read ? 1 : 0,
               deliveredAck: acknowledged ? 1 : 0,
@@ -87,7 +113,7 @@ export function timberDb() {
         // We are the old tab holding someone else up. Close so they can proceed;
         // this tab reopens the database lazily on its next query.
         console.warn("Closing an outdated Timber database connection so another tab can upgrade.");
-        dbPromise?.then((db) => db.close()).catch(() => {});
+        dbPromise?.then((db) => { db.close(); }).catch(() => {});
         dbPromise = null;
       },
     });
@@ -96,7 +122,7 @@ export function timberDb() {
 }
 
 /** Destroy every trace of the account on this device. */
-export async function destroyTimberDb() {
+export async function destroyTimberDb(): Promise<void> {
   if (dbPromise) {
     const db = await dbPromise;
     db.close();

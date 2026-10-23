@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // The service worker has no DOM. Giving it one is how `document` and
+    // `window` sneak into a file that would throw at runtime if it used them.
+    "lib": ["ES2023", "WebWorker"],
+    "types": ["vite/client"]
+  },
+  "include": ["src/sw.js", "src/sw.ts", "src/types/serviceWorker.d.ts"]
+}

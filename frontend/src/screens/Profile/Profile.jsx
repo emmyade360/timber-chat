@@ -6,6 +6,7 @@ import { useChatStore } from "../../store/chatStore.js";
 import { updateCurrentUser, userMessage } from "../../lib/api.js";
 import { Icons } from "../../components/Settings/icons.jsx";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import GrowthBar from "../../components/Level/GrowthBar.jsx";
 import Modal from "../../components/Modal.jsx";
 
 function ProfileAvatar({ username, url, size = "large" }) {
@@ -30,7 +31,7 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
   return (
     <div className="screen profile-screen">
       <header className="timber-header">
-        <span className="timber-header-mark" aria-hidden="true">◈</span>
+        <span className="timber-header-mark" aria-hidden="true">{Icons.growth}</span>
         <h1>Timber</h1>
         <button className="screen-header-action" onClick={() => onOpenSettings()} aria-label="Open settings" title="Settings">
           {Icons.settings}
@@ -39,7 +40,7 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
 
       <section className="profile-reference-hero">
         <ProfileAvatar username={me.username} url={me.avatar_url} />
-        <button className="profile-avatar-edit" onClick={() => setEditing(true)} aria-label="Edit profile photo">✎</button>
+        <button className="profile-avatar-edit" onClick={() => setEditing(true)} aria-label="Edit profile photo">{Icons.compose}</button>
         <div className="profile-view-identity">
           <h2>
             {me.username}
@@ -48,12 +49,21 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
             <LevelBadge level={me.level} size={20} name={me.level_name} />
             <span className="profile-stage-name">{me.level_name}</span>
           </p>
+          {me.is_anonymous && <p className="anonymous-account-note">Anonymous account · saved on this device</p>}
         </div>
       </section>
 
+      <button className="profile-growth-route" onClick={() => onOpenSettings("growth")} aria-label={`Open your growth journey. Current stage: ${me.level_name}`}>
+        <span className="profile-growth-content">
+          <GrowthBar me={me} badgeSize={36} />
+          <small>{me.next_level_name ? `Continue your path towards ${me.next_level_name}` : "You have reached the final stage"}</small>
+        </span>
+        <span className="profile-row-chevron profile-growth-chevron" aria-hidden="true">{Icons.back}</span>
+      </button>
+
       <section className="profile-vault-card" aria-label="Secure chat summary">
         <div className="profile-secure-card-head">
-          <span className="profile-row-icon" aria-hidden="true">☁</span>
+          <span className="profile-row-icon" aria-hidden="true">{Icons.vault}</span>
           <span className="profile-secure-card-copy"><strong>Secure chats</strong><small>{syncing ? "Syncing encrypted conversations" : "Encrypted on this device"}</small></span>
           <span className="profile-secure-card-status"><i />{syncing ? "Syncing" : "Ready"}</span>
         </div>
@@ -64,10 +74,10 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
       </section>
 
       <section className="profile-actions" aria-label="Profile settings">
-        <ProfileRow icon="⚿" title="Recovery phrase" subtitle="Back up your identity" onClick={() => onOpenSettings("phrase")} />
-        <ProfileRow icon="♧" title="Notifications" subtitle="Alerts and sounds" toggle onClick={() => onOpenSettings("notifications")} />
-        <ProfileRow icon="◉" title="Privacy" subtitle="Connections and discovery" onClick={() => onOpenVault("explore")} />
-        <ProfileRow icon="◌" title="Theme" subtitle={`${theme[0].toUpperCase()}${theme.slice(1)}${theme === "dark" ? " (Default)" : ""}`} onClick={() => setThemeOpen(true)} />
+        <ProfileRow icon={Icons.key} title="Recovery phrase" subtitle="Back up your identity" onClick={() => onOpenSettings("phrase")} />
+        <ProfileRow icon={Icons.bell} title="Notifications" subtitle="Choose what reaches this device" onClick={() => onOpenSettings("notifications")} />
+        <ProfileRow icon={Icons.compass} title="Privacy" subtitle="Connections and discovery" onClick={() => onOpenVault("explore")} />
+        <ProfileRow icon={Icons.moon} title="Theme" subtitle={`${theme[0].toUpperCase()}${theme.slice(1)}${theme === "dark" ? " (Default)" : ""}`} onClick={() => setThemeOpen(true)} />
       </section>
 
       {themeOpen && (
@@ -88,11 +98,11 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
   );
 }
 
-function ProfileRow({ icon, title, subtitle, onClick, toggle = false }) {
+function ProfileRow({ icon, title, subtitle, onClick }) {
   return <button className="profile-action-row" onClick={onClick}>
     <span className="profile-action-icon">{icon}</span>
     <span><strong>{title}</strong><small>{subtitle}</small></span>
-    {toggle ? <span className="profile-toggle" aria-hidden="true"><i /></span> : <span className="profile-row-chevron">›</span>}
+    <span className="profile-row-chevron" aria-hidden="true">›</span>
   </button>;
 }
 

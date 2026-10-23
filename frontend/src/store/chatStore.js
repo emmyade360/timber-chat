@@ -16,11 +16,16 @@ export const useChatStore = create((set, get) => ({
   typing: {},
   onlineUsers: new Set(),
   levelUp: null,
+  /** Live per-friendship streaks, keyed by peer id. */
+  streaks: {},
   syncing: false,
   /** True whenever a call is being set up, ringing, or connected. */
   callActive: false,
 
   setMe: (me) => set({ me }),
+  setStreaks: (streaks) => set({ streaks }),
+  setStreak: (peerId, streak) =>
+    set((state) => ({ streaks: { ...state.streaks, [peerId]: streak } })),
   setLadder: (ladder) => set({ ladder }),
   setSyncing: (syncing) => set({ syncing }),
   setCallActive: (callActive) => set({ callActive }),
@@ -134,5 +139,6 @@ export const useChatStore = create((set, get) => ({
       typing: {},
       onlineUsers: new Set(),
       levelUp: null,
+      streaks: {},
     }),
 }));

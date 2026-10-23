@@ -11,6 +11,13 @@ const { version } = JSON.parse(readFileSync(new URL('./package.json', import.met
 // https://vite.dev/config/
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
+  server: {
+    // Some Linux environments (including shared dev containers) run out of
+    // inotify watchers before Vite can watch its config and source tree.
+    // Polling avoids that host limit; a 500 ms interval keeps the dev server
+    // responsive without polling as aggressively as Chokidar's default.
+    watch: { usePolling: true, interval: 500 },
+  },
   plugins: [
     react(),
     VitePWA({
@@ -43,13 +50,37 @@ export default defineConfig({
     }),
   ],
   test: {
-    environment: 'node',
-    // The vault suite runs the real scrypt (N = 2^16) once per unlock attempt,
-    // and the self-destruct test spends the whole attempt limit. That is ~4.4s
-    // on an idle machine, which overruns the 5s default the moment CI shares a
-    // runner. The KDF is deliberately slow; the budget was the wrong part.
-    testTimeout: 30_000,
-    setupFiles: ['./src/test/setup.js'],
-    include: ['src/**/*.test.js', 'src/**/*.test.jsx'],
+    // Two environments, deliberately separated. The crypto and storage suites
+    // run the real scrypt (N = 2^16) and a real IndexedDB; putting them in
+    // jsdom would slow them down for no benefit, and they need no DOM at all.
+    // Component tests need a document. Splitting keeps each honest and lets the
+    // node half stay the fast, dependency-free safety net it already is.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          // The vault suite runs the real scrypt (N = 2^16) once per unlock
+          // attempt, and the self-destruct test spends the whole attempt limit.
+          // That is ~4.4s on an idle machine, which overruns the 5s default the
+          // moment CI shares a runner. The KDF is deliberately slow; the budget
+          // was the wrong part.
+          testTimeout: 30_000,
+          setupFiles: ['./src/test/setup.js'],
+          include: ['src/{lib,crypto,db,store,services,state,core,styles}/**/*.test.{js,jsx,ts,tsx}'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          testTimeout: 30_000,
+          setupFiles: ['./src/test/setup.js', './src/test/setup.dom.js'],
+          include: ['src/{components,screens,app,features,hooks}/**/*.test.{js,jsx,ts,tsx}'],
+        },
+      },
+    ],
   },
 })
