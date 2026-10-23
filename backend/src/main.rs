@@ -200,10 +200,16 @@ async fn connect_database(
                 tokio::time::sleep(delay).await;
             }
             Err(error) => {
+                let error_message = error.to_string();
+                let detail = if error_message.contains("tenant/user")
+                    && error_message.contains("not found") {
+                    " Supabase could not match the pooler host and database username to a project. Copy the current Session Pooler URI from the Supabase Dashboard's Connect dialog, replacing only the password; do not construct the pooler hostname from the region."
+                } else {
+                    " Confirm SUPABASE_DB_URL is the Supabase pooler's SSL connection string and that the pooler is accepting new clients."
+                };
                 return Err(format!(
                     "Database connection was not acquired after {DATABASE_CONNECT_ATTEMPTS} attempts \
-                     (each waited up to {} seconds): {error}. Confirm SUPABASE_DB_URL is the \
-                     Supabase pooler's SSL connection string and that the pooler is accepting new clients.",
+                     (each waited up to {} seconds): {error}.{detail}",
                     DATABASE_ACQUIRE_TIMEOUT.as_secs(),
                 )
                 .into());

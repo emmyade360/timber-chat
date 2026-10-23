@@ -23,6 +23,7 @@ import {
 import { useChatStore } from "../../store/chatStore.js";
 import { reconcileRealtime } from "../../lib/sync.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 import { timeAgo } from "../../lib/time.js";
 
 function normalizedSearchTerm(value) {
@@ -138,7 +139,7 @@ export default function People({ onOpenConversation, onBack }) {
     <div className="screen">
       <div className="screen-toolbar">
         <header className="screen-header">
-          {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back">‹</button>}
+          {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back">{Icons.back}</button>}
           <h1 className="screen-title">People</h1>
           <div className="people-views" role="group" aria-label="People views">
             <ViewIcon

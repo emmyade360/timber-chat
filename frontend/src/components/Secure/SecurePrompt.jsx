@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { isVaultSecured } from "../../crypto/vault.js";
+import { Icons } from "../Settings/icons.jsx";
 
 const SNOOZE_KEY = "timber-secure-prompt-snoozed";
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
@@ -41,7 +42,7 @@ export default function SecurePrompt({ conversationCount = 0, onStart }) {
 
   return (
     <section className="secure-prompt glass-panel">
-      <span className="secure-prompt-mark" aria-hidden="true">⚿</span>
+      <span className="secure-prompt-mark" aria-hidden="true">{Icons.key}</span>
       <div className="secure-prompt-copy">
         <strong>Back up your account</strong>
         <small>

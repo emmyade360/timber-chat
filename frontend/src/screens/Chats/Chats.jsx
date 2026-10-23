@@ -15,7 +15,7 @@ function previewText(preview) {
   if (preview.undecryptable) {
     return preview.reason === "waiting-for-key" ? "Syncing…" : "Could not be decrypted";
   }
-  if (preview.payload?.t === "file") return `📎 ${preview.payload.name ?? "Attachment"}`;
+  if (preview.payload?.t === "file") return `Attachment · ${preview.payload.name ?? "file"}`;
   return preview.payload?.body ?? "";
 }
 
@@ -56,7 +56,7 @@ export default function Chats({ onOpen, onFindPeople, onInvite, onSecureAccount,
           <span className="chat-list-mark" aria-hidden="true">{Icons.shield}</span>
           <h1 className="screen-title">Timber</h1>
           {syncing && <span className="sync-dot" title="Syncing" />}
-          <button className="screen-header-action chat-list-compose" onClick={onFindPeople} aria-label="Start a private connection" title="Find people">✎</button>
+          <button className="screen-header-action chat-list-compose" onClick={onFindPeople} aria-label="Start a private connection" title="Find people">{Icons.compose}</button>
         </header>
         <div className="search-wrap">
           <input
@@ -100,7 +100,7 @@ export default function Chats({ onOpen, onFindPeople, onInvite, onSecureAccount,
 
       {conversations.length === 0 ? (
         <div className="empty-state">
-          <span className="empty-icon">🌲</span>
+          <span className="empty-icon" aria-hidden="true">{Icons.chats}</span>
           <h2 className="empty-title">{syncing ? "Syncing…" : "No conversations yet"}</h2>
           <p className="empty-sub">
             Find someone by username and send a friend request. Once you both accept, you can talk.
@@ -114,12 +114,12 @@ export default function Chats({ onOpen, onFindPeople, onInvite, onSecureAccount,
             </button>
           </div>
           <p className="empty-hint">
-            Growth comes from talking to people, keeping streaks, and inviting friends.
+            Your path begins when a friend accepts your request. There is no rush to keep up.
           </p>
         </div>
       ) : visibleConversations.length === 0 ? (
         <div className="empty-state chat-filter-empty">
-          <span className="empty-icon">⌕</span>
+          <span className="empty-icon" aria-hidden="true">{Icons.search}</span>
           <h2 className="empty-title">No matching friends</h2>
           <p className="empty-sub">Try another username, or clear the search to see every chat.</p>
           <button className="btn-ghost" onClick={() => setQuery("")}>Clear search</button>

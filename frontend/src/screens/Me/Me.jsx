@@ -58,7 +58,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
       .catch(() => {});
     return () => { ignore = true; };
   }, [panel]);
-  const [page, setPage] = useState(() => initialPanel === "notifications" ? "notifications" : "root");
+  const [page, setPage] = useState(() => ["notifications", "growth"].includes(initialPanel) ? initialPanel : "root");
 
   if (!me) return <div className="screen"><div className="empty-state">Loading…</div></div>;
 
@@ -70,7 +70,7 @@ export default function Settings({ onBack, onOpenExplore, onOpenInstall, onSignO
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to profile">{Icons.back}</button>
         <h1 className="screen-title">Settings</h1>
       </header>
 
@@ -191,7 +191,7 @@ function SubPage({ title, onBack, children }) {
   return (
     <div className="screen">
       <header className="screen-header">
-        <button className="screen-header-back" onClick={onBack} aria-label="Back to settings">‹</button>
+        <button className="screen-header-back" onClick={onBack} aria-label="Back to settings">{Icons.back}</button>
         <h1 className="screen-title">{title}</h1>
       </header>
       {children}
@@ -201,6 +201,11 @@ function SubPage({ title, onBack, children }) {
 
 /** The full ladder and how growth is earned. Long, so it gets its own page. */
 function GrowthPage({ me, ladder, onBack }) {
+  const chapters = [
+    { name: "Formation", eyebrow: "The first rings", from: 1, to: 5 },
+    { name: "Craft", eyebrow: "Finding your grain", from: 6, to: 13 },
+    { name: "Legend", eyebrow: "A well-worn path", from: 14, to: 21 },
+  ];
   return (
     <SubPage title="Your growth path" onBack={onBack}>
       <section className="profile-hero">
@@ -213,7 +218,7 @@ function GrowthPage({ me, ladder, onBack }) {
 
       {ladder?.practices && (
         <section className="panel">
-          <h3 className="section-title">Connection practices</h3>
+          <h3 className="section-title">What shapes your journey</h3>
           <ul className="earn-list">
             {ladder.practices.map((rule) => (
               <li key={rule.kind}>
@@ -226,28 +231,52 @@ function GrowthPage({ me, ladder, onBack }) {
             ))}
           </ul>
           <p className="panel-note">
-            Growth reflects steady, consent-based connection — never message volume,
-            time online, popularity, or anything you say. It is not a health score.
-            Daily practices are capped at {ladder.daily_growth_ceiling} growth points.
+            Growth comes from check-ins, steady return, accepted connections, message
+            activity (capped each day), streaks, and friends who join through your invite.
+            The relay never reads message contents. Growth is a participation marker,
+            not a measure of friendship or personal worth. Routine activity is capped at
+            {" "}{ladder.daily_growth_ceiling} points per day; accepted connections and
+            referrals have separate milestone caps.
           </p>
         </section>
       )}
 
       {ladder?.stages && (
-        <ol className="ladder">
-          {ladder.stages.map((tier) => {
-            const reached = me.level >= tier.level;
-            const current = me.level === tier.level;
+        <div className="adventure-path" aria-label="Growth journey stages">
+          <div className="adventure-path-intro">
+            <span className="adventure-path-kicker">The long way, together</span>
+            <p>Every stage is reached through real connection. There is no deadline.</p>
+          </div>
+          {chapters.map((chapter, chapterIndex) => {
+            const stages = ladder.stages.filter((tier) => tier.level >= chapter.from && tier.level <= chapter.to);
+            if (!stages.length) return null;
+            const active = me.level >= chapter.from && me.level <= chapter.to;
+            const complete = me.level > chapter.to;
             return (
-              <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`}>
-                <LevelBadge level={tier.level} size={30} />
-                <span className="ladder-name">{tier.name}</span>
-                <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
-                {current && <span className="ladder-you">you</span>}
-              </li>
+              <section className={`adventure-chapter ${active ? "is-active" : ""} ${complete ? "is-complete" : ""}`} key={chapter.name}>
+                <header className="adventure-chapter-head">
+                  <span className="adventure-chapter-number" aria-hidden="true">0{chapterIndex + 1}</span>
+                  <span><small>{chapter.eyebrow}</small><strong>{chapter.name}</strong></span>
+                  {active && <span className="adventure-current-label">You are here</span>}
+                </header>
+                <ol className="ladder">
+                  {stages.map((tier) => {
+                    const reached = me.level >= tier.level;
+                    const current = me.level === tier.level;
+                    return (
+                      <li key={tier.level} className={`ladder-row ${reached ? "" : "ladder-row--locked"} ${current ? "ladder-row--current" : ""}`} aria-current={current ? "step" : undefined}>
+                        <span className="ladder-marker"><LevelBadge level={tier.level} size={30} /></span>
+                        <span className="ladder-name">{tier.name}</span>
+                        <span className="ladder-growth">{tier.threshold.toLocaleString()} growth</span>
+                        {current && <span className="ladder-you">Here</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
             );
           })}
-        </ol>
+        </div>
       )}
     </SubPage>
   );

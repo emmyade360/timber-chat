@@ -98,6 +98,42 @@ export const Icons = {
   lock: (
     <svg {...stroke}><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.2" /><path d="M7.8 10.5V7.2a4.2 4.2 0 0 1 8.4 0v3.3" /></svg>
   ),
+  compose: (
+    <svg {...stroke}><path d="M12 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-6" /><path d="m16.5 3.5 4 4L12 16l-4 1 1-4Z" /></svg>
+  ),
+  attach: (
+    <svg {...stroke}><path d="m8.5 12.5 6.8-6.8a3.2 3.2 0 0 1 4.5 4.5l-8.5 8.5a5 5 0 0 1-7.1-7.1l8.5-8.5" /></svg>
+  ),
+  microphone: (
+    <svg {...stroke}><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8" /></svg>
+  ),
+  stop: (
+    <svg {...stroke}><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+  ),
+  send: (
+    <svg {...stroke}><path d="m21 3-7.2 18-3.9-7.9L2 9.2Z" /><path d="M21 3 9.9 13.1" /></svg>
+  ),
+  more: (
+    <svg {...stroke}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>
+  ),
+  reply: (
+    <svg {...stroke}><path d="m9 17-5-5 5-5" /><path d="M4 12h9a7 7 0 0 1 7 7" /></svg>
+  ),
+  reaction: (
+    <svg {...stroke}><circle cx="12" cy="12" r="9" /><path d="M8 14s1.4 2 4 2 4-2 4-2M9 9h.01M15 9h.01" /></svg>
+  ),
+  bookmark: (
+    <svg {...stroke}><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-3.8L6 21Z" /></svg>
+  ),
+  pinMessage: (
+    <svg {...stroke}><path d="m16 3 5 5-4 1-4 4-1 4-5-5 4-1 4-4Z" /><path d="m8 16-5 5" /></svg>
+  ),
+  edit: (
+    <svg {...stroke}><path d="M12 20h9" /><path d="m16.5 3.5 4 4L9 19l-5 1 1-5Z" /></svg>
+  ),
+  close: (
+    <svg {...stroke}><path d="m18 6-12 12M6 6l12 12" /></svg>
+  ),
   info: (
     <svg {...stroke}><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5.5" /><path d="M12 7.8h.01" /></svg>
   ),

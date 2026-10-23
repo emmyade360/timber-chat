@@ -1,22 +1,17 @@
-// A per-friendship streak, as a flame and a day count.
-//
-// Shown only once a streak actually exists, so an empty chat list stays quiet.
-// `at_risk` is the state the whole mechanic turns on -- both people sent
-// yesterday and only one of them has today -- so it reads differently.
+// A quiet per-friendship rhythm marker. The count is informational; it does not
+// warn people that a relationship or earned progress is about to expire.
 
 export default function StreakFlame({ streak, className = "" }) {
   if (!streak?.days) return null;
-  const { days, at_risk: atRisk } = streak;
-  const label = atRisk
-    ? `${days}-day streak, ends tonight unless you both send`
-    : `${days}-day streak`;
+  const { days } = streak;
+  const label = `${days}-day shared rhythm`;
   return (
     <span
-      className={`streak-flame ${atRisk ? "streak-flame--at-risk" : ""} ${className}`}
-      title={label}
+      className={`streak-flame ${className}`}
+      title={`Shared rhythm: ${days} days`}
       aria-label={label}
     >
-      <span aria-hidden="true">{"\u{1F525}"}</span>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 17.2a6.2 6.2 0 1 0-6.2-6.2c0 3.4 2.8 6.2 6.2 6.2Z" /><path d="M10 13.9a2.9 2.9 0 1 0 0-5.8c-1.6 1.1-2.2 2.1-2.2 3.1" /></svg>
       {days}
     </span>
   );

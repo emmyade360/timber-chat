@@ -15,6 +15,7 @@ import {
 } from "../../lib/api.js";
 import { reconcileRealtime } from "../../lib/sync.js";
 import Modal from "../../components/Modal.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 
 const EMPTY_PROFILE = {
   adult_confirmed: false,
@@ -167,7 +168,7 @@ export default function Explore({ onOpenConversation, onBack }) {
   return (
     <div className="screen explore-screen">
       <header className="screen-header">
-        {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back to Vault">‹</button>}
+        {onBack && <button className="screen-header-back" onClick={onBack} aria-label="Back to Vault">{Icons.back}</button>}
         <h1 className="screen-title">Explore</h1>
       </header>
 

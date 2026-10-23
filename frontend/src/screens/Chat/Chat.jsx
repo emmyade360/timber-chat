@@ -79,6 +79,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
   const [recording, setRecording] = useState(false);
   const [notificationsMuted, setNotificationsMuted] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [messageActionsFor, setMessageActionsFor] = useState(null);
   // Which message currently has the reaction picker open, if any.
   const [reactingTo, setReactingTo] = useState(null);
   const scrollRef = useRef(null);
@@ -155,6 +156,15 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
     const node = scrollRef.current;
     if (node) node.scrollTop = node.scrollHeight;
   }, [list.length, peerTyping]);
+
+  useEffect(() => {
+    if (!messageActionsFor) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setMessageActionsFor(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [messageActionsFor]);
 
   useEffect(() => {
     if (!searchTerm.trim()) return undefined;
@@ -338,12 +348,18 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
       <header className="chat-header">
         <div className="chat-header-identity">
           {onBack && <button className="icon-btn chat-header-back" onClick={onBack} aria-label="Back">{Icons.back}</button>}
+          <span className={`avatar chat-header-avatar ${onlineUsers.has(conversation?.peerId) ? "avatar--online" : ""}`} aria-hidden="true">
+            {conversation?.peerUsername?.[0]?.toUpperCase() ?? "?"}
+          </span>
           <div className="chat-header-text">
             <span className="chat-header-name">
               {conversation?.peerUsername ?? "Private contact"}
               <StreakFlame streak={streaks[conversation?.peerId]} />
+              {verified && <span className="chat-header-verified" title="Safety number verified on this device" aria-label="Safety number verified on this device">{Icons.shield}</span>}
             </span>
-            <span className="chat-header-sub">{peerTyping ? "typing…" : onlineUsers.has(conversation?.peerId) ? "online" : ""}</span>
+            <span className={`chat-header-sub chat-presence ${peerTyping ? "chat-presence--typing" : onlineUsers.has(conversation?.peerId) ? "chat-presence--online" : "chat-presence--offline"}`}>
+              {peerTyping ? "Typing…" : onlineUsers.has(conversation?.peerId) ? "Online" : "Offline"}
+            </span>
           </div>
         </div>
         <div className="chat-header-actions" aria-label="Conversation actions">
@@ -355,7 +371,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
             <button className="chat-header-action" onClick={() => setSearchOpen((open) => !open)} aria-label="Search this encrypted conversation" title="Search">{Icons.search}</button>
             {safetyNumber && <button className="chat-header-action" onClick={() => setShowSafety(true)} aria-label="Verify contact safety number" title={verified ? "Verified" : "Verify safety number"}>{Icons.shield}</button>}
           </div>
-          <button className="chat-header-action chat-header-overflow" onClick={() => setActionsOpen((open) => !open)} aria-expanded={actionsOpen} aria-label="More conversation actions">⋮</button>
+          <button className="chat-header-action chat-header-overflow" onClick={() => setActionsOpen((open) => !open)} aria-expanded={actionsOpen} aria-label="More conversation actions">{Icons.more}</button>
           {actionsOpen && <div className="chat-action-sheet">
             <button disabled={!secure || call?.phase !== "idle"} onClick={() => { setActionsOpen(false); startCall("audio"); }}>{Icons.callAudio}<span>Voice call</span></button>
             <button disabled={!secure || call?.phase !== "idle"} onClick={() => { setActionsOpen(false); startCall("video"); }}>{Icons.callVideo}<span>Video call</span></button>
@@ -372,7 +388,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
       </div>}
 
       <div className="message-scroll" ref={scrollRef} onScroll={onScroll}>
-        <p className="e2e-notice">🔒 Messages are encrypted on your device. Not even Timber can read them.</p>
+        <p className="e2e-notice"><span className="e2e-notice-icon">{Icons.lock}</span><span>Encrypted on this device · not even Timber can read your messages</span></p>
         {conversation?.securityError && <p className="onboard-warning">{conversation.securityError}</p>}
         {list.map((message) => {
           const mine = message.senderId === me;
@@ -380,7 +396,7 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
           return <div key={message.id} className={`bubble-row ${mine ? "bubble-row--mine" : ""}`}>
             <div className={`bubble ${mine ? "bubble--mine" : "bubble--theirs"} ${message.deleted || message.expired ? "bubble--muted" : ""}`}>
               {message.undecryptable ? <span className="bubble-undecryptable">{message.reason === "waiting-for-key" ? "Waiting for this contact's key…" : "This message could not be decrypted."}</span> : message.deleted ? <span className="bubble-undecryptable">This message was deleted for everyone.</span> : message.expired ? <span className="bubble-undecryptable">This postcard has expired.</span> : <MessageContent message={message} replied={replied} onVote={(value) => sendControl(payloads.decisionVote(message.id, value))} />}
-              {message.pinned && <span className="message-pin">📌 Pinned</span>}
+              {message.pinned && <span className="message-pin">{Icons.pinMessage}<span>Pinned</span></span>}
               {Object.entries(message.reactions ?? {}).map(([emoji, people]) => {
                 const mine_ = people.includes(me);
                 return (
@@ -396,14 +412,23 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
                 );
               })}
               <span className="bubble-meta">{message.payload?.scheduled_at && message.pending ? `Scheduled ${new Date(message.payload.scheduled_at).toLocaleString()} · ` : ""}{timeAgo(message.createdAt)}{mine && <Receipt message={message} />}</span>
-              {!message.undecryptable && !message.deleted && !message.expired && <div className="message-tools">
-                <button onClick={() => setReplyTo(message)} aria-label="Reply">↩</button>
-                <button onClick={() => setReactingTo(message.id)} aria-label="Add a reaction" aria-haspopup="menu">☺</button>
-                <button onClick={() => saveMessage(message)} aria-label="Save message">{saved.has(message.id) ? "★" : "☆"}</button>
-                <button onClick={() => sendControl(payloads.pin(message.id, !message.pinned))} aria-label="Toggle shared pin">📌</button>
-                {mine && message.payload?.t === "text" && <button onClick={() => { const body = window.prompt("Edit message", message.payload.body); if (body?.trim()) sendControl(payloads.edit(message.id, body.trim())); }} aria-label="Edit message">✎</button>}
-                {mine && <button onClick={() => window.confirm("Delete this for everyone?") && sendControl(payloads.delete(message.id))} aria-label="Delete for everyone">×</button>}
-              </div>}
+              {!message.undecryptable && !message.deleted && !message.expired && <>
+                <button
+                  className="message-more"
+                  type="button"
+                  onClick={() => setMessageActionsFor((current) => current === message.id ? null : message.id)}
+                  aria-label="Message actions"
+                  aria-expanded={messageActionsFor === message.id}
+                >{Icons.more}</button>
+                {messageActionsFor === message.id && <div className="message-tools" role="group" aria-label="Message actions">
+                  <button onClick={() => { setReplyTo(message); setMessageActionsFor(null); }} aria-label="Reply" title="Reply">{Icons.reply}<span>Reply</span></button>
+                  <button onClick={() => { setReactingTo(message.id); setMessageActionsFor(null); }} aria-label="Add a reaction" title="React">{Icons.reaction}<span>React</span></button>
+                  <button onClick={() => { saveMessage(message); setMessageActionsFor(null); }} aria-label={saved.has(message.id) ? "Remove saved message" : "Save message"} title="Save on this device">{Icons.bookmark}<span>{saved.has(message.id) ? "Unsave" : "Save"}</span></button>
+                  <button onClick={() => { sendControl(payloads.pin(message.id, !message.pinned)); setMessageActionsFor(null); }} aria-label="Toggle shared pin" title="Pin for this conversation">{Icons.pinMessage}<span>{message.pinned ? "Unpin" : "Pin"}</span></button>
+                  {mine && message.payload?.t === "text" && <button onClick={() => { const body = window.prompt("Edit message", message.payload.body); if (body?.trim()) sendControl(payloads.edit(message.id, body.trim())); setMessageActionsFor(null); }} aria-label="Edit message" title="Edit">{Icons.edit}<span>Edit</span></button>}
+                  {mine && <button onClick={() => { if (window.confirm("Delete this for everyone?")) sendControl(payloads.delete(message.id)); setMessageActionsFor(null); }} aria-label="Delete for everyone" title="Delete for everyone">{Icons.trash}<span>Delete</span></button>}
+                </div>}
+              </>}
               {reactingTo === message.id && (
                 <ReactionPicker
                   onClose={() => setReactingTo(null)}
@@ -421,13 +446,13 @@ export default function Chat({ conversationId, send, onBack, onStartCall, call, 
       </div>
 
       {sendError && <p className="chat-send-error">{sendError}</p>}
-      {replyTo && <div className="reply-bar"><span>Replying to {labelForPayload(replyTo.payload).slice(0, 70)}</span><button onClick={() => setReplyTo(null)} aria-label="Cancel reply">×</button></div>}
+      {replyTo && <div className="reply-bar"><span>Replying to {labelForPayload(replyTo.payload).slice(0, 70)}</span><button onClick={() => setReplyTo(null)} aria-label="Cancel reply">{Icons.close}</button></div>}
       <div className="composer">
         <input ref={fileInput} className="sr-only" type="file" accept={FILE_ACCEPT} onChange={(event) => { attachFile(event.target.files?.[0]); event.target.value = ""; }} />
-        <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">⌇</button>
-        <button className={`composer-attach composer-record ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? "■" : "◉"}</button>
+        <button className="composer-attach" disabled={!secure} onClick={() => fileInput.current?.click()} aria-label="Attach encrypted file">{Icons.attach}</button>
+        <button className={`composer-attach composer-record ${recording ? "composer-attach--recording" : ""}`} disabled={!secure} onClick={toggleVoice} aria-label={recording ? "Stop recording" : "Record encrypted voice note"}>{recording ? Icons.stop : Icons.microphone}</button>
         <input className="glass-input composer-input" placeholder="Say something…" value={text} onChange={(event) => handleChange(event.target.value)} onKeyDown={(event) => event.key === "Enter" && submit()} disabled={!secure} />
-        <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()} aria-label="Send message">➤</button>
+        <button className="btn-wood composer-send" onClick={submit} disabled={!secure || !text.trim()} aria-label="Send message">{Icons.send}</button>
       </div>
 
       {showSafety && (
@@ -506,5 +531,5 @@ function CallCard({ payload }) {
     failed: "Could not connect",
   };
   const seconds = Math.round((payload.duration_ms ?? 0) / 1000);
-  return <div className="call-history-card"><span aria-hidden="true">{payload.mode === "video" ? "▣" : "☎"}</span><span><strong>{payload.mode === "video" ? "Video" : "Audio"} call</strong><small>{labels[payload.status] ?? "Call"}{seconds ? ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : ""}</small></span></div>;
+  return <div className="call-history-card"><span aria-hidden="true">{payload.mode === "video" ? Icons.callVideo : Icons.callAudio}</span><span><strong>{payload.mode === "video" ? "Video" : "Audio"} call</strong><small>{labels[payload.status] ?? "Call"}{seconds ? ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}` : ""}</small></span></div>;
 }

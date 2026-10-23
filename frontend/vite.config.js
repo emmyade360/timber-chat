@@ -11,6 +11,13 @@ const { version } = JSON.parse(readFileSync(new URL('./package.json', import.met
 // https://vite.dev/config/
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
+  server: {
+    // Some Linux environments (including shared dev containers) run out of
+    // inotify watchers before Vite can watch its config and source tree.
+    // Polling avoids that host limit; a 500 ms interval keeps the dev server
+    // responsive without polling as aggressively as Chokidar's default.
+    watch: { usePolling: true, interval: 500 },
+  },
   plugins: [
     react(),
     VitePWA({

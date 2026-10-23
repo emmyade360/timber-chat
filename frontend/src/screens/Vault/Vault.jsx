@@ -8,7 +8,7 @@ export default function Vault({ onOpenExplore }) {
   return (
     <div className="screen vault-screen">
       <header className="timber-header">
-        <span className="timber-header-mark" aria-hidden="true">◈</span>
+        <span className="timber-header-mark" aria-hidden="true">{Icons.growth}</span>
         <h1>Vault</h1>
         <span className="timber-header-lock" title="Private connections only">{Icons.lock}</span>
       </header>
