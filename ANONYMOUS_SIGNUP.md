@@ -67,8 +67,8 @@ Screens captured from that local app:
 
 ## Release order
 
-Deploy backend commit `b2df56b` or a later commit containing migration 0011 and
-`POST /auth/register/anonymous` before publishing the frontend to production.
+Deploy the backend from `main`, containing migration 0011 and
+`POST /auth/register/anonymous`, before publishing the frontend to production.
 Startup applies the additive migration. Confirm `/health` and that an empty JSON
 POST to the new route returns a validation error rather than a missing route.
 The deployment details are in [DEPLOYMENT.md](DEPLOYMENT.md).

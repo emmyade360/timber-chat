@@ -28,6 +28,11 @@ TURN shared secret. `VITE_*` values are public build-time URLs, not secrets.
 
 ## 1. Deploy the backend to Render
 
+The production Render service tracks `main`. Push backend changes to `main` to
+trigger its deployment; pushes to `frontend-foundation` create Vercel previews
+and do not update that Render service. Verify the live backend before merging
+dependent frontend changes into `main`.
+
 For anonymous signup, deploy the backend containing migration
 `0011_anonymous_accounts.sql` first. Startup applies the additive column before
 serving `POST /auth/register/anonymous`. Verify `/health`, then publish the new
