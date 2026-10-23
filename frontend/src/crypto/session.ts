@@ -8,6 +8,7 @@
 import { identityFromSeed, mnemonicSeed } from "./identity.js";
 import type { Identity } from "../types/crypto.js";
 import { forgetConversationKeys } from "./envelope.js";
+import { setPrivacyIdentity } from "../lib/accountPrivacy.js";
 
 let identity: Identity | null = null;
 // The seed is kept beside the keys it produced, for two reasons: re-sealing the
@@ -26,6 +27,7 @@ function adopt(nextSeed: Uint8Array, startedAt: number): Identity {
   closeSession();
   seed = nextSeed;
   identity = identityFromSeed(seed);
+  setPrivacyIdentity(identity.userId);
   openedAt = startedAt;
   notify();
   return identity;
@@ -72,6 +74,7 @@ export function isUnlocked(): boolean {
 
 /** Lock: wipe every derived secret and drop cached conversation keys. */
 export function closeSession(): void {
+  setPrivacyIdentity(null);
   if (identity) {
     identity.identitySk.fill(0);
     identity.kexSk.fill(0);

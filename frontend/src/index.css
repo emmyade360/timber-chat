@@ -2872,6 +2872,17 @@ html[data-theme="light"] {
 
 /* The growth ladder is presented as three real chapters from the level
    system. The route is informational and can be scanned without animation. */
+.anonymous-entry { display: flex; align-items: center; justify-content: flex-start; gap: 12px; text-align: left; border: 1px solid var(--border); border-radius: 12px; }
+.anonymous-entry > span:first-child { display: grid; place-items: center; flex: 0 0 24px; color: var(--accent); }
+.anonymous-entry svg, .anonymous-signup-note svg { width: 22px; height: 22px; }
+.anonymous-entry strong, .anonymous-entry small { display: block; }
+.anonymous-entry small { margin-top: 4px; color: var(--text-muted); font-size: 12px; line-height: 1.45; font-weight: 400; }
+.anonymous-signup-note { display: flex; gap: 12px; margin: 0 0 22px; padding: 16px; color: var(--text-primary); background: color-mix(in srgb, var(--accent) 8%, var(--bg-list)); border: 1px solid var(--border); border-radius: 14px; text-align: left; }
+.anonymous-signup-note > span { flex: 0 0 22px; color: var(--accent); }
+.anonymous-signup-note strong { font-size: 14px; }
+.anonymous-signup-note p { margin: 7px 0; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
+.anonymous-signup-note small { display: block; color: var(--text-faint); font-size: 12px; line-height: 1.5; }
+.anonymous-account-note { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
 .adventure-path { display: grid; gap: 14px; padding: 0 16px 28px; }
 .adventure-path-intro {
   padding: 18px 20px;

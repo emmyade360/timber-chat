@@ -6,11 +6,12 @@
 // behaviour the app did not have. They are one operation here.
 
 import { closeSession, currentSeed, openSession, reopenSession, sessionOpenedAt } from "../crypto/session.js";
-import { openDeviceVault, vaultKind } from "../crypto/vault.js";
+import { openDeviceVault, vaultKind, vaultPrivacy } from "../crypto/vault.js";
 import { clearResume, openResume, sealResume } from "../crypto/resume.js";
 import { LOCK_POLICIES, normalizeLockPolicy, readLockPolicy, writeLockPolicy } from "./lockPolicy.js";
 import { signIn } from "./auth.js";
 import { startSessionRecovery, stopSessionRecovery } from "./sessionRecovery.js";
+import { setAccountPrivacy, setAnalyticsSessionActive } from "./accountPrivacy.js";
 
 /** Unlock: open the session and leave whatever resume token the policy allows. */
 export async function beginSession(mnemonic, policy = readLockPolicy()) {
@@ -26,9 +27,11 @@ export async function beginSession(mnemonic, policy = readLockPolicy()) {
  * launch" answer and the answer for an expired two-hour lease.
  */
 export async function restoreSession(policy = readLockPolicy()) {
+  const privacy = await vaultPrivacy().catch(() => null);
   const token = await openResume(policy);
   if (token) {
     const identity = reopenSession(token.seed, token.openedAt);
+    setAccountPrivacy(privacy, identity.userId);
     // The API token is held in memory only, so a resumed session signs in again.
     // Offline that fails and the app opens on local history, exactly as it does
     // when the network drops mid-session -- and now keeps trying in the
@@ -36,7 +39,7 @@ export async function restoreSession(policy = readLockPolicy()) {
     await signIn(identity).catch(() => { startSessionRecovery(); });
     return true;
   }
-  return openUnsecuredSession(policy);
+  return openUnsecuredSession(policy, privacy);
 }
 
 /**
@@ -47,10 +50,11 @@ export async function restoreSession(policy = readLockPolicy()) {
  * which is what makes a two-tap signup possible, and it costs no scrypt so the
  * launch is immediate. A failure here simply falls back to the lock screen.
  */
-async function openUnsecuredSession(policy) {
+async function openUnsecuredSession(policy, privacy) {
   try {
     if (await vaultKind() !== "device") return false;
     const identity = await beginSession(await openDeviceVault(), policy);
+    setAccountPrivacy(privacy, identity.userId);
     await signIn(identity).catch(() => { startSessionRecovery(); });
     return true;
   } catch {
@@ -60,6 +64,7 @@ async function openUnsecuredSession(policy) {
 
 /** Lock: wipe the live keys and the resume token together. */
 export function endSession() {
+  setAnalyticsSessionActive(false);
   // Nothing may keep signing in for a session that no longer exists.
   stopSessionRecovery();
   closeSession();

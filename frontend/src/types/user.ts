@@ -4,6 +4,8 @@
 export interface User {
   id: string;
   username: string;
+  /** Optional only for profiles cached before anonymous signup shipped. */
+  is_anonymous?: boolean;
   avatar_url: string | null;
   level: number;
   level_name: string;

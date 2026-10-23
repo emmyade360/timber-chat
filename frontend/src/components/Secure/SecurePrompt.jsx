@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { isVaultSecured } from "../../crypto/vault.js";
 import { Icons } from "../Settings/icons.jsx";
+import { useChatStore } from "../../store/chatStore.js";
 
 const SNOOZE_KEY = "timber-secure-prompt-snoozed";
 const SNOOZE_MS = 24 * 60 * 60 * 1000;
@@ -27,18 +28,19 @@ function snooze() {
 
 export default function SecurePrompt({ conversationCount = 0, onStart }) {
   const [show, setShow] = useState(false);
+  const anonymousOrUnknown = useChatStore((state) => state.me?.is_anonymous !== false);
 
   useEffect(() => {
     let ignore = false;
     // Nothing to protect yet, or recently put off.
-    if (conversationCount < 1 || Date.now() < snoozedUntil()) return undefined;
+    if (anonymousOrUnknown || conversationCount < 1 || Date.now() < snoozedUntil()) return undefined;
     isVaultSecured()
       .then((secured) => { if (!ignore) setShow(!secured); })
       .catch(() => {});
     return () => { ignore = true; };
-  }, [conversationCount]);
+  }, [conversationCount, anonymousOrUnknown]);
 
-  if (!show) return null;
+  if (!show || anonymousOrUnknown) return null;
 
   return (
     <section className="secure-prompt glass-panel">

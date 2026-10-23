@@ -45,6 +45,8 @@ interface TransferVault {
   createdAt: unknown;
   kdf?: ScryptCost;
   identity?: VaultIdentity;
+  ownerId?: string;
+  isAnonymous?: boolean;
 }
 
 const VAULT_KEY = "seed";
@@ -123,6 +125,23 @@ export async function isVaultSecured(): Promise<boolean> {
 export async function vaultIdentity(): Promise<VaultIdentity | null> {
   const record = await readVault();
   return record?.identity ?? null;
+}
+
+/** Unknown/legacy metadata never opts a session into analytics. */
+export async function vaultPrivacy(): Promise<boolean | null> {
+  const record = await readVault();
+  return typeof record?.isAnonymous === "boolean" ? record.isAnonymous : null;
+}
+
+export async function setVaultPrivacy(userId: string, isAnonymous: boolean): Promise<void> {
+  const db = await timberDb();
+  const tx = db.transaction(STORE_VAULT, "readwrite");
+  const record = await tx.store.get(VAULT_KEY);
+  if ((isVaultRecord(record) || isDeviceVaultRecord(record))
+    && (record.ownerId ?? record.identity?.userId) === userId) {
+    await tx.store.put({ ...record, isAnonymous }, VAULT_KEY);
+  }
+  await tx.done;
 }
 
 /** Keep the recognition card in step with a changed username or avatar. */
@@ -205,7 +224,11 @@ export class PhraseMismatchError extends Error {
  * `vaultExists` is what decides between onboarding and the app on boot, and it
  * costs no scrypt, so launching is immediate.
  */
-export async function createDeviceVault(mnemonic: string, identity?: VaultIdentity): Promise<void> {
+export async function makeDeviceVaultRecord(
+  mnemonic: string,
+  identity?: VaultIdentity,
+  isAnonymous?: boolean,
+): Promise<DeviceVaultRecord> {
   const crypt = subtle();
   if (!crypt) throw new Error("This browser cannot store a Timber account securely.");
 
@@ -218,15 +241,32 @@ export async function createDeviceVault(mnemonic: string, identity?: VaultIdenti
   const sealed = await crypt.encrypt({ name: "AES-GCM", iv }, key, plaintext);
   plaintext.fill(0);
 
-  await writeVault({
+  return {
     kind: "device",
+    ownerId: deriveIdentity(mnemonic).userId,
     key,
     iv,
     sealed,
     version: VAULT_VERSION,
     createdAt: Date.now(),
     ...(identity ? { identity } : {}),
-  });
+    ...(typeof isAnonymous === "boolean" ? { isAnonymous } : {}),
+  };
+}
+
+export async function createDeviceVault(mnemonic: string, identity?: VaultIdentity, isAnonymous?: boolean): Promise<void> {
+  const record = await makeDeviceVaultRecord(mnemonic, identity, isAnonymous);
+  const db = await timberDb();
+  const tx = db.transaction(STORE_VAULT, "readwrite");
+  const previous = await tx.store.get(VAULT_KEY);
+  const pending = await tx.store.get("pending-registration");
+  if (previous || pending) {
+    await tx.done;
+    if (isDeviceVaultRecord(previous) && previous.ownerId === record.ownerId && !pending) return;
+    throw new Error("This device already holds an account or unfinished signup. Reopen Timber to continue it.");
+  }
+  await tx.store.add(record, VAULT_KEY);
+  await tx.done;
 }
 
 /** Open an unsecured vault. There is no PIN, so this cannot fail on a wrong guess. */
@@ -264,6 +304,8 @@ export async function createVault(
   key.fill(0);
 
   await writeVault({
+    ownerId: deriveIdentity(mnemonic).userId,
+    ...(typeof previous?.isAnonymous === "boolean" ? { isAnonymous: previous.isAnonymous } : {}),
     salt: bytesToBase64(salt),
     nonce: bytesToBase64(nonce),
     ciphertext: bytesToBase64(ciphertext),
@@ -383,6 +425,8 @@ export async function exportVaultTransfer(): Promise<string> {
       ...(record.kdf ? { kdf: record.kdf } : {}),
       // So the new device recognises its owner on the very first lock screen.
       ...(record.identity ? { identity: record.identity } : {}),
+      ...(record.ownerId ? { ownerId: record.ownerId } : {}),
+      ...(typeof record.isAnonymous === "boolean" ? { isAnonymous: record.isAnonymous } : {}),
       // A new physical device begins its own local unlock-attempt counter.
       attempts: 0,
     },
@@ -430,7 +474,7 @@ function transferVault(packageData: unknown): TransferVault | null {
   if (typeof outer.vault !== "object" || outer.vault === null) return null;
 
   const vault = outer.vault as Record<string, unknown>;
-  const { salt, nonce, ciphertext, version, createdAt, kdf, identity } = vault;
+  const { salt, nonce, ciphertext, version, createdAt, kdf, identity, ownerId, isAnonymous } = vault;
   if (typeof version !== "number" || !SUPPORTED_VAULT_VERSIONS.has(version)) return null;
   if (typeof salt !== "string" || typeof nonce !== "string" || typeof ciphertext !== "string") return null;
   try {
@@ -452,6 +496,8 @@ function transferVault(packageData: unknown): TransferVault | null {
     createdAt,
     ...(cost ? { kdf: cost } : {}),
     ...(owner ? { identity: owner } : {}),
+    ...(typeof ownerId === "string" ? { ownerId } : {}),
+    ...(typeof isAnonymous === "boolean" ? { isAnonymous } : {}),
   };
 }
 
@@ -466,7 +512,13 @@ export async function importVaultTransfer(value: string): Promise<void> {
   }
   const vault = transferVault(packageData);
   if (!vault) throw new Error("That transfer package is incomplete or has been altered.");
-  const existing = await readVault();
+  const db = await timberDb();
+  const tx = db.transaction(STORE_VAULT, "readwrite");
+  const existing = await tx.store.get(VAULT_KEY);
+  if (await tx.store.get("pending-registration")) {
+    await tx.done;
+    throw new Error("Finish this device’s pending signup before importing another account.");
+  }
   if (isVaultRecord(existing)) {
     // Retrying a PIN or a transient sign-in failure must not strand the new
     // device after the first import. A different vault still cannot overwrite it.
@@ -476,7 +528,7 @@ export async function importVaultTransfer(value: string): Promise<void> {
   if (isDeviceVaultRecord(existing)) {
     throw new Error("This device already has a Timber account. Remove it before importing another one.");
   }
-  await writeVault({
+  await tx.store.put({
     salt: vault.salt,
     nonce: vault.nonce,
     ciphertext: vault.ciphertext,
@@ -487,7 +539,10 @@ export async function importVaultTransfer(value: string): Promise<void> {
       : Date.now(),
     ...(vault.kdf ? { kdf: vault.kdf } : {}),
     ...(vault.identity ? { identity: vault.identity } : {}),
-  });
+    ...(vault.ownerId ? { ownerId: vault.ownerId } : {}),
+    ...(typeof vault.isAnonymous === "boolean" ? { isAnonymous: vault.isAnonymous } : {}),
+  }, VAULT_KEY);
+  await tx.done;
 }
 
 /** Remove the account and all local history from this device. */

@@ -49,6 +49,7 @@ export default function Profile({ onOpenSettings, onOpenVault, theme, onThemeCha
             <LevelBadge level={me.level} size={20} name={me.level_name} />
             <span className="profile-stage-name">{me.level_name}</span>
           </p>
+          {me.is_anonymous && <p className="anonymous-account-note">Anonymous account · saved on this device</p>}
         </div>
       </section>
 

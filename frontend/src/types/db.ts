@@ -54,6 +54,8 @@ export interface VaultIdentity {
 
 /** The PIN-wrapped recovery phrase. Meaningful before unlock; sealed regardless. */
 export interface VaultRecord {
+  ownerId?: string;
+  isAnonymous?: boolean;
   salt: string;
   nonce: string;
   ciphertext: string;
@@ -86,6 +88,8 @@ export interface VaultRecord {
  */
 export interface DeviceVaultRecord {
   kind: "device";
+  ownerId?: string;
+  isAnonymous?: boolean;
   key: CryptoKey;
   iv: Uint8Array<ArrayBuffer>;
   sealed: ArrayBuffer;
@@ -102,11 +106,22 @@ export interface ResumeRecord {
   openedAt: number;
 }
 
+/** An encrypted, unfinished signup. Never an active vault or resume token. */
+export interface PendingRegistrationRecord {
+  kind: "pending-registration";
+  userId: string;
+  key: CryptoKey;
+  iv: Uint8Array<ArrayBuffer>;
+  sealed: ArrayBuffer;
+  version: 1;
+  createdAt: number;
+}
+
 /** Everything the vault store can hold, under any of its fixed keys. */
-export type StoredVaultRecord = VaultRecord | ResumeRecord | DeviceVaultRecord;
+export type StoredVaultRecord = VaultRecord | ResumeRecord | DeviceVaultRecord | PendingRegistrationRecord;
 
 /**
- * The vault store keeps three unrelated shapes under two fixed keys. Reading one
+ * The vault store keeps four shapes under three fixed keys. Reading one
  * where another was expected is a real hazard -- an unrecognised record must
  * be treated as "nothing to resume from", not coerced.
  *
@@ -130,9 +145,17 @@ export function isResumeRecord(
   record: StoredVaultRecord | undefined,
 ): record is ResumeRecord {
   return record !== undefined
-    && !isDeviceVaultRecord(record)
+    && !("kind" in record)
+    && "openedAt" in record
+    && typeof record.openedAt === "number"
     && "key" in record
     && "sealed" in record;
+}
+
+export function isPendingRegistrationRecord(
+  record: StoredVaultRecord | undefined,
+): record is PendingRegistrationRecord {
+  return record !== undefined && "kind" in record && record.kind === "pending-registration";
 }
 
 export interface ConversationRecord {
@@ -149,7 +172,7 @@ export interface PeerRecord {
 
 export interface TimberDb extends DBSchema {
   vault: {
-    // Out-of-line keys: "seed" holds the vault, "resume" the session token.
+    // Out-of-line keys: "seed", "resume", and "pending-registration".
     key: string;
     value: StoredVaultRecord;
   };

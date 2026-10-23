@@ -35,6 +35,7 @@ import { useTheme } from "./hooks/useTheme.js";
 import Vault from "./screens/Vault/Vault.jsx";
 import SecureAccount from "./screens/Secure/SecureAccount.jsx";
 import { mobileTabSelection, notificationMobileDestination } from "./lib/mobileNavigation.js";
+import { setAccountPrivacy, setAnalyticsSessionActive } from "./lib/accountPrivacy.js";
 import "./index.css";
 
 export default function App() {
@@ -46,6 +47,11 @@ export default function App() {
   const pwa = usePwaInstall();
   const [theme, setTheme] = useTheme();
   const [lockPolicy, setLockPolicy] = useLockPolicy();
+
+  useEffect(() => {
+    setAnalyticsSessionActive(phase === "ready");
+    return () => setAnalyticsSessionActive(false);
+  }, [phase]);
 
   useEffect(() => {
     let live = true;
@@ -80,6 +86,8 @@ export default function App() {
   }, []);
 
   const wiped = useCallback(async (message) => {
+    setAnalyticsSessionActive(false);
+    setAccountPrivacy(null);
     // Wipe the browser subscription before clearing the authenticated token.
     // This removes the endpoint from every device/account registration instead
     // of leaving a stale service-worker subscription behind after a reset.
@@ -93,6 +101,7 @@ export default function App() {
   }, [revokeAndClearToken]);
 
   const lock = useCallback(() => {
+    setAnalyticsSessionActive(false);
     // Locking drops the resume token as well as the live keys, so the next load
     // asks for the PIN whatever the auto-lock policy says.
     endSession().catch(() => {});

@@ -6,30 +6,45 @@
 // expensive screen in the product. The phrase is offered later, from
 // screens/Secure/SecureAccount.jsx, once there is a conversation worth keeping.
 //
-// Until then the account is real, non-custodial and fully encrypted -- it simply
-// has no PIN on it, which is the one state that cannot strand anybody: there is
-// nothing to forget, so nothing to be locked out of.
+// Both signup paths stage device-sealed keys before making an account online.
+// Device storage is still essential: deleting it can remove account access.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import GrowingTree from "../../components/Loader/GrowingTree.js";
 import { useSlowWait } from "../../components/Loader/useSlowWait.js";
 import { WAKING_MESSAGE } from "../../lib/api.js";
 import { createMnemonic, deriveIdentity, isValidMnemonic, normalizeMnemonic, unknownWords } from "../../crypto/identity.js";
 import { createDeviceVault, importVaultTransfer, unlockVault } from "../../crypto/vault.js";
 import { beginSession } from "../../lib/lockSession.js";
-import { hasAccount, register, signIn } from "../../lib/auth.js";
+import { hasAccount, signIn } from "../../lib/auth.js";
+import { pendingRegistration } from "../../crypto/registration.js";
+import { completeRegistration } from "../../lib/registration.js";
 import { inviteCodeFromUrl, lookupInvite } from "../../lib/api.js";
 import LevelBadge from "../../components/Level/LevelBadge.jsx";
 import TogetherMark from "../../components/Together/TogetherMark.jsx";
+import { Icons } from "../../components/Settings/icons.jsx";
 
 export default function Onboarding({ onReady }) {
   const [step, setStep] = useState("welcome");
-  const [mnemonic, setMnemonic] = useState("");
+  const [draft, setDraft] = useState(null);
+  const [initializing, setInitializing] = useState(true);
+  const submitting = useRef(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // Present when the visitor arrived through someone's invite link.
   const [inviteCode] = useState(() => inviteCodeFromUrl());
   const [inviter, setInviter] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    pendingRegistration().then((pending) => {
+      if (!live) return;
+      if (pending) { setDraft(pending); setStep("username"); }
+    }).catch(() => {
+      if (live) setError("Could not read this device’s account storage. Keep its browser data and try reopening Timber.");
+    }).finally(() => { if (live) setInitializing(false); });
+    return () => { live = false; };
+  }, []);
 
   useEffect(() => {
     if (!inviteCode) return undefined;
@@ -42,28 +57,42 @@ export default function Onboarding({ onReady }) {
   }, [inviteCode]);
 
   const restart = () => {
-    setMnemonic("");
     setError("");
     setStep("welcome");
+  };
+
+  const startSignup = async (isAnonymous) => {
+    setError("");
+    try {
+      const pending = await pendingRegistration();
+      setDraft(pending ?? { mnemonic: createMnemonic(), username: "", isAnonymous, inviteCode });
+      setStep("username");
+    } catch {
+      setError("This browser cannot save an account securely. Enable site storage and try again.");
+    }
   };
 
   /**
    * Claim the username and go straight in.
    *
-   * The vault is written only after the server round trip succeeds, so a failed
-   * signup cannot leave a half-created account on the device.
+   * A pending encrypted identity survives failures and is only promoted to the
+   * active vault once the matching server account is confirmed.
    */
   const create = async (username) => {
+    if (!draft || submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setError("");
     try {
-      const identity = deriveIdentity(mnemonic);
-      await register(identity, username, inviteCode);
-      await createDeviceVault(mnemonic, { userId: identity.userId, username });
-      await beginSession(mnemonic);
-      onReady({ newAccount: true });
+      const result = await completeRegistration({ ...draft, username });
+      await beginSession(result.mnemonic);
+      onReady({ newAccount: result.created });
     } catch (caught) {
       setError(caught.message);
+      const pending = await pendingRegistration().catch(() => null);
+      if (pending) setDraft(pending);
+    } finally {
+      submitting.current = false;
       setBusy(false);
     }
   };
@@ -78,6 +107,7 @@ export default function Onboarding({ onReady }) {
     setBusy(true);
     setError("");
     try {
+      if (await pendingRegistration()) throw new Error("Finish this device’s pending signup before restoring another account.");
       const normalized = normalizeMnemonic(phrase);
       const identity = deriveIdentity(normalized);
       if (!(await hasAccount(identity))) {
@@ -85,8 +115,8 @@ export default function Onboarding({ onReady }) {
         setBusy(false);
         return;
       }
-      await signIn(identity);
-      await createDeviceVault(normalized, { userId: identity.userId, username: "" });
+      const account = await signIn(identity);
+      await createDeviceVault(normalized, { userId: identity.userId, username: account.username }, account.is_anonymous);
       await beginSession(normalized);
       onReady({ newAccount: false });
     } catch (caught) {
@@ -98,6 +128,7 @@ export default function Onboarding({ onReady }) {
   return (
     <div className="onboard-bg">
       <div className="onboard-card glass-panel">
+        {initializing && <GrowingTree size={140} label="Opening Timber…" />}
         {inviter && step === "welcome" && (
           <div className="invite-banner">
             <LevelBadge level={inviter.level} size={38} />
@@ -110,20 +141,22 @@ export default function Onboarding({ onReady }) {
           </div>
         )}
 
-        {step === "welcome" && (
+        {!initializing && step === "welcome" && (
           <Welcome
-            onCreate={() => {
-              setMnemonic(createMnemonic());
-              setStep("username");
-            }}
+            onCreate={() => startSignup(false)}
+            onAnonymous={() => startSignup(true)}
             onImport={() => setStep("import")}
             onTransfer={() => setStep("transfer")}
           />
         )}
 
-        {step === "username" && (
-          <ClaimUsername busy={busy} error={error} onBack={restart} onClaimed={create} />
+        {!initializing && step === "username" && draft && (
+          <ClaimUsername busy={busy} error={error} onBack={restart} onClaimed={create}
+            username={draft.username} isAnonymous={draft.isAnonymous}
+            onUsernameChange={(username) => setDraft((current) => ({ ...current, username }))} />
         )}
+
+        {!initializing && step === "welcome" && error && <p className="form-error" role="alert">{error}</p>}
 
         {step === "import" && (
           <ImportPhrase busy={busy} error={error} onBack={restart} onSubmit={restore} />
@@ -156,7 +189,7 @@ export default function Onboarding({ onReady }) {
   );
 }
 
-function Welcome({ onCreate, onImport, onTransfer }) {
+function Welcome({ onCreate, onAnonymous, onImport, onTransfer }) {
   return (
     <>
       <Logo tagline={false} />
@@ -167,6 +200,10 @@ function Welcome({ onCreate, onImport, onTransfer }) {
       </p>
       <button className="btn-wood btn-block" onClick={onCreate}>
         Create a new account
+      </button>
+      <button className="btn-ghost btn-block anonymous-entry" onClick={onAnonymous}>
+        <span aria-hidden="true">{Icons.shield}</span>
+        <span><strong>Continue anonymously</strong><small>Choose a username · saved on this device · no usage analytics</small></span>
       </button>
       <button className="btn-ghost btn-block" onClick={onImport}>
         I already have a recovery phrase
@@ -245,25 +282,32 @@ function ImportPhrase({ onSubmit, onBack, busy, error }) {
  * offline, and it is the first request to touch a relay that may have been
  * asleep -- so this is where the wait gets a picture and an explanation.
  */
-function ClaimUsername({ onClaimed, onBack, busy, error }) {
-  const [username, setUsername] = useState("");
+function ClaimUsername({ onClaimed, onBack, busy, error, username, onUsernameChange, isAnonymous }) {
   const slow = useSlowWait(busy);
   const normalized = username.trim().toLowerCase();
   const valid = /^[a-z0-9_]{3,20}$/.test(normalized);
 
   if (busy) {
-    return <GrowingTree size={168} label={slow ? WAKING_MESSAGE : "Planting your grove…"} />;
+    return <GrowingTree size={168} label={slow ? WAKING_MESSAGE : isAnonymous ? "Saving your anonymous account…" : "Planting your grove…"} />;
   }
 
   return (
     <>
-      <h2 className="onboard-title">Choose your username</h2>
+      <h2 className="onboard-title">{isAnonymous ? "Your anonymous username" : "Choose your username"}</h2>
       <p className="onboard-lede">
-        This is how friends find you. It is claimed once and cannot be changed.
+        {isAnonymous ? "Choose a username so friends can find you. Your account is saved on this device. No email or phone number required."
+          : "This is how friends find you. It is claimed once and cannot be changed."}
       </p>
+      {isAnonymous && <div className="anonymous-signup-note">
+        <span aria-hidden="true">{Icons.shield}</span>
+        <div><strong>Your alias. Your device.</strong>
+          <p>Optional usage analytics are off. Clearing browser data or losing this device can remove access to your account.</p>
+          <small>Your username is permanent. Choose an alias that does not identify you.</small>
+        </div>
+      </div>}
 
       <div className="field-group">
-        <label className="field-label">Username</label>
+        <label className="field-label" htmlFor="claim-username">Username</label>
         <div className="username-field">
           <span className="username-at">@</span>
           <input
@@ -275,7 +319,7 @@ function ClaimUsername({ onClaimed, onBack, busy, error }) {
             placeholder="your_name"
             autoFocus
             value={username}
-            onChange={(event) => setUsername(event.target.value)}
+            onChange={(event) => onUsernameChange(event.target.value)}
             onKeyDown={(event) => { if (event.key === "Enter" && valid) onClaimed(normalized); }}
           />
         </div>
@@ -285,7 +329,7 @@ function ClaimUsername({ onClaimed, onBack, busy, error }) {
       {error && <p className="form-error">{error}</p>}
 
       <button className="btn-wood btn-block" disabled={!valid} onClick={() => onClaimed(normalized)}>
-        Enter the Grove
+        {isAnonymous ? "Create anonymous account" : "Enter the Grove"}
       </button>
       <button className="btn-ghost btn-block" onClick={onBack}>
         Back
