@@ -1,0 +1,9 @@
+[advisories]
+# web-push -> jwt-simple -> superboring includes RSA alongside ES256 support.
+# Timber uses only ES256/P-256 for VAPID (web_push::VapidSignatureBuilder) and
+# Ed25519 for account authentication. It never creates or processes RSA private
+# keys, so the RSA private-operation timing attack is not reachable here.
+# Revisit this exception if RSA signing/decryption or another RSA consumer is
+# introduced, or when upstream removes/fixes the dependency. All other
+# advisories remain enforced. https://rustsec.org/advisories/RUSTSEC-2023-0071.html
+ignore = ["RUSTSEC-2023-0071"]

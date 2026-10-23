@@ -36,6 +36,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  // Tests must not depend on an untracked developer .env or production keys.
+  vi.stubEnv("VITE_WEB_PUSH_PUBLIC_KEY", "test-public-key");
   local.getMeta.mockResolvedValue(null);
   api.savePushSubscription.mockResolvedValue({});
   api.removePushSubscription.mockResolvedValue({});
