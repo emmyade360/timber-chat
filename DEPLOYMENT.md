@@ -12,10 +12,13 @@ secret.
    trailing slash.
 2. Create the private Supabase Storage bucket `chat-files`. It must not have a
    public read policy. Timber sends it only opaque encrypted blobs.
-3. Use Supabase's **session pooler** SSL connection string for `SUPABASE_DB_URL`
-   (normally pooler port 5432), not the direct database host. Keep
-   `DATABASE_MAX_CONNECTIONS` within the connection budget assigned by that
-   pooler. Percent-encode special password characters.
+3. Copy Supabase's **session pooler** connection string from the project's
+   Dashboard → **Connect** dialog for `SUPABASE_DB_URL` (normally pooler port
+   5432), not the direct database host. Preserve the exact pooler hostname,
+   including its cluster index: do not derive an `aws-N` hostname from the
+   region or reuse one from another project. Replace only the password, with
+   reserved characters percent-encoded. Keep `DATABASE_MAX_CONNECTIONS` within
+   the connection budget assigned by that pooler.
 4. For reliable calls outside one local network, operate a STUN/TURN service.
    Production requires coturn's `static-auth-secret` REST credential mode; Timber
    will not issue a long-lived static TURN credential on Render.
@@ -24,6 +27,19 @@ Never commit the backend `.env`, a Supabase service-role key, database URL, or
 TURN shared secret. `VITE_*` values are public build-time URLs, not secrets.
 
 ## 1. Deploy the backend to Render
+
+For anonymous signup, deploy the backend containing migration
+`0011_anonymous_accounts.sql` first. Startup applies the additive column before
+serving `POST /auth/register/anonymous`. Verify `/health`, then publish the new
+frontend. Existing users retain their IDs, keys, usernames, and chat history.
+The frontend keeps optional analytics disabled until an account's mode is known;
+onboarding and anonymous sessions never enable it.
+
+For local/CI database verification, set `TEST_DATABASE_URL` to a disposable
+Postgres database and run `cargo test --locked`. Auth integration tests apply
+the real SQLx migrations and exercise anonymous signup, login, username rules,
+invitations, and owner-only profile metadata. Do not use a production database
+for these tests.
 
 The included [render.yaml](./render.yaml) creates one Rust Web Service with:
 
@@ -148,6 +164,13 @@ From a clean browser profile at the Vercel URL:
    protected Render logs.
 
 ## Operations checklist
+
+If startup reports `tenant/user ... not found`, the shared pooler did not match
+the configured host and username to a project. Verify `SUPABASE_DB_URL` against
+the current Session Pooler URI in the Supabase **Connect** dialog, then update
+the Render environment variable and redeploy. The username should be
+`postgres.<project-ref>` for the shared pooler; this error usually indicates a
+host or username mismatch, not an incorrect database password.
 
 - Keep Render and Supabase in a region close to the largest user group.
 - Keep database, Storage, and TURN credentials in their provider secret stores.

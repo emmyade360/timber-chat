@@ -14,6 +14,7 @@ mod models;
 mod routes;
 mod ws;
 mod growth;
+mod streaks;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -199,10 +200,16 @@ async fn connect_database(
                 tokio::time::sleep(delay).await;
             }
             Err(error) => {
+                let error_message = error.to_string();
+                let detail = if error_message.contains("tenant/user")
+                    && error_message.contains("not found") {
+                    " Supabase could not match the pooler host and database username to a project. Copy the current Session Pooler URI from the Supabase Dashboard's Connect dialog, replacing only the password; do not construct the pooler hostname from the region."
+                } else {
+                    " Confirm SUPABASE_DB_URL is the Supabase pooler's SSL connection string and that the pooler is accepting new clients."
+                };
                 return Err(format!(
                     "Database connection was not acquired after {DATABASE_CONNECT_ATTEMPTS} attempts \
-                     (each waited up to {} seconds): {error}. Confirm SUPABASE_DB_URL is the \
-                     Supabase pooler's SSL connection string and that the pooler is accepting new clients.",
+                     (each waited up to {} seconds): {error}.{detail}",
                     DATABASE_ACQUIRE_TIMEOUT.as_secs(),
                 )
                 .into());
@@ -263,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_api = Router::new()
         .route("/challenge", post(auth::challenge))
         .route("/register", post(auth::register))
+        .route("/register/anonymous", post(auth::register_anonymous))
         .route("/login", post(auth::login))
         // Authentication requests consist solely of public keys and signatures.
         // Keep malformed requests from claiming the attachment upload budget.
@@ -270,6 +278,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let protected_api = Router::new()
         .route("/growth", get(routes::users::get_growth))
+        .route("/streaks", get(routes::users::get_streaks))
+        .route("/leaderboard", get(routes::users::get_leaderboard))
+        .route("/leaderboard/opt-in", post(routes::users::set_leaderboard_opt_in))
         .route(
             "/users/me",
             get(routes::users::get_current_user).patch(routes::users::update_current_user),

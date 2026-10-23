@@ -401,6 +401,7 @@ pub struct SessionResponse {
     token: String,
     user_id: Uuid,
     username: String,
+    is_anonymous: bool,
     /// Present on registration when an invite code was accepted.
     #[serde(skip_serializing_if = "Option::is_none")]
     invited_by: Option<String>,
@@ -409,6 +410,21 @@ pub struct SessionResponse {
 pub async fn register(
     State(state): State<AppState>,
     Json(input): Json<RegisterInput>,
+) -> Result<Json<SessionResponse>, ApiError> {
+    register_account(state, input, false).await
+}
+
+pub async fn register_anonymous(
+    State(state): State<AppState>,
+    Json(input): Json<RegisterInput>,
+) -> Result<Json<SessionResponse>, ApiError> {
+    register_account(state, input, true).await
+}
+
+async fn register_account(
+    state: AppState,
+    input: RegisterInput,
+    is_anonymous: bool,
 ) -> Result<Json<SessionResponse>, ApiError> {
     let identity_pk = decode_key(&input.identity_pk, "identity_pk")?;
     let kex_pk = decode_key(&input.kex_pk, "kex_pk")?;
@@ -445,8 +461,8 @@ pub async fn register(
 
     let inserted = sqlx::query(
         r#"
-        INSERT INTO profiles (id, username, identity_pk, kex_pk, kex_key_signature, invite_code)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO profiles (id, username, identity_pk, kex_pk, kex_key_signature, invite_code, is_anonymous)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (username) DO NOTHING
         "#,
     )
@@ -456,6 +472,7 @@ pub async fn register(
     .bind(&kex_pk[..])
     .bind(&kex_key_signature[..])
     .bind(generate_invite_code())
+    .bind(is_anonymous)
     .execute(&state.db)
     .await?;
 
@@ -476,6 +493,7 @@ pub async fn register(
         token: issue_token(&state.db, user_id).await?,
         user_id,
         username,
+        is_anonymous,
         invited_by,
     }))
 }
@@ -502,7 +520,7 @@ pub async fn login(
     {
         return Err(ApiError::TooManyRequests("Too many sign-in attempts. Try again shortly.".into()));
     }
-    let username: String = sqlx::query_scalar("SELECT username FROM profiles WHERE id = $1")
+    let (username, is_anonymous): (String, bool) = sqlx::query_as("SELECT username, is_anonymous FROM profiles WHERE id = $1")
         .bind(user_id)
         .fetch_optional(&state.db)
         .await?
@@ -514,6 +532,7 @@ pub async fn login(
         token: issue_token(&state.db, user_id).await?,
         user_id,
         username,
+        is_anonymous,
         invited_by: None,
     }))
 }
@@ -724,5 +743,129 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(token_digest(&first).len(), 32);
         assert!(first.chars().all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_'));
+    }
+
+    async fn integration_state() -> Option<AppState> {
+        let url = std::env::var("TEST_DATABASE_URL").ok()?;
+        let db = sqlx::postgres::PgPoolOptions::new().max_connections(3)
+            .connect(&url).await.expect("the disposable test database must be reachable");
+        sqlx::migrate!("./migrations").run(&db).await.expect("test migrations apply");
+        let (events, _) = tokio::sync::broadcast::channel(32);
+        Some(AppState {
+            db,
+            http: reqwest::Client::new(),
+            supabase: crate::SupabaseConfig { url: "http://127.0.0.1:1".into(), service_key: "test-only".into() },
+            events,
+            online_users: std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            allowed_origins: std::sync::Arc::new(std::collections::HashSet::new()),
+            limits: crate::limits::RateLimiter::default(),
+        })
+    }
+
+    fn fresh_signing_key() -> SigningKey {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        SigningKey::from_bytes(&bytes)
+    }
+
+    fn test_username(key: &SigningKey) -> String {
+        format!("anon_{}", &user_id_for_public_key(&key.verifying_key().to_bytes()).simple().to_string()[..10])
+    }
+
+    async fn registration_input(state: &AppState, key: &SigningKey, username: &str, invite_code: Option<String>) -> RegisterInput {
+        let identity_pk = key.verifying_key().to_bytes();
+        let user_id = user_id_for_public_key(&identity_pk);
+        let kex_pk = [7u8; 32];
+        let challenge = challenge(State(state.clone()), Json(ChallengeInput { identity_pk: BASE64.encode(identity_pk) }))
+            .await.expect("challenge succeeds").0;
+        RegisterInput {
+            identity_pk: BASE64.encode(identity_pk),
+            kex_pk: BASE64.encode(kex_pk),
+            kex_key_signature: BASE64.encode(key.sign(&kex_key_binding_message(user_id, &identity_pk, &kex_pk)).to_bytes()),
+            username: username.into(),
+            signature: BASE64.encode(key.sign(&BASE64.decode(challenge.nonce).unwrap()).to_bytes()),
+            invite_code,
+        }
+    }
+
+    #[tokio::test]
+    async fn anonymous_registration_persists_owner_only_mode_and_requires_keys() {
+        let Some(state) = integration_state().await else { return; };
+        let key = fresh_signing_key();
+        let username = test_username(&key);
+        let input = registration_input(&state, &key, &username.to_uppercase(), None).await;
+        let account = register_anonymous(State(state.clone()), Json(input)).await.unwrap().0;
+        assert!(account.is_anonymous);
+        assert_eq!(account.username, username);
+        assert_eq!(account.user_id, user_id_for_public_key(&key.verifying_key().to_bytes()));
+
+        let owner = AuthUser { id: account.user_id, username: username.clone() };
+        let profile = crate::routes::users::get_current_user(State(state.clone()), Extension(owner.clone())).await.unwrap().0;
+        assert!(profile.is_anonymous);
+        let public = crate::routes::users::get_user(State(state.clone()), Extension(owner.clone()), axum::extract::Path(account.user_id))
+            .await.unwrap().0;
+        assert!(serde_json::to_value(public).unwrap().get("is_anonymous").is_none());
+        let requester_key = fresh_signing_key();
+        let requester_name = test_username(&requester_key);
+        let requester_input = registration_input(&state, &requester_key, &requester_name, None).await;
+        let requester = register(State(state.clone()), Json(requester_input)).await.unwrap().0;
+        let search = crate::routes::users::search_users(State(state.clone()),
+            Extension(AuthUser { id: requester.user_id, username: requester_name }),
+            axum::extract::Query(crate::models::SearchQuery { q: Some(username.clone()) })).await.unwrap().0;
+        assert_eq!(search.len(), 1);
+        assert_eq!(search[0].id, account.user_id);
+        assert!(serde_json::to_value(&search[0]).unwrap().get("is_anonymous").is_none());
+
+        let challenge = challenge(State(state.clone()), Json(ChallengeInput { identity_pk: BASE64.encode(key.verifying_key().to_bytes()) }))
+            .await.unwrap().0;
+        let nonce = BASE64.decode(challenge.nonce).unwrap();
+        let forged = login(State(state.clone()), Json(LoginInput {
+            identity_pk: BASE64.encode(key.verifying_key().to_bytes()),
+            signature: BASE64.encode(fresh_signing_key().sign(&nonce).to_bytes()),
+        })).await;
+        assert!(matches!(forged, Err(ApiError::Unauthorized)));
+        let signed_in = login(State(state.clone()), Json(LoginInput {
+            identity_pk: BASE64.encode(key.verifying_key().to_bytes()),
+            signature: BASE64.encode(key.sign(&nonce).to_bytes()),
+        })).await.unwrap().0;
+        assert_eq!(signed_in.user_id, account.user_id);
+        assert!(signed_in.is_anonymous);
+        sqlx::query("DELETE FROM profiles WHERE id = ANY($1)").bind(vec![account.user_id, requester.user_id])
+            .execute(&state.db).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn anonymous_signup_keeps_standard_username_and_invitation_rules() {
+        let Some(state) = integration_state().await else { return; };
+        let inviter_key = fresh_signing_key();
+        let username = test_username(&inviter_key);
+        let input = registration_input(&state, &inviter_key, &username, None).await;
+        let inviter = register(State(state.clone()), Json(input)).await.unwrap().0;
+        assert!(!inviter.is_anonymous);
+        let code: String = sqlx::query_scalar("SELECT invite_code FROM profiles WHERE id = $1")
+            .bind(inviter.user_id).fetch_one(&state.db).await.unwrap();
+
+        let anonymous_key = fresh_signing_key();
+        let name = test_username(&anonymous_key);
+        let input = registration_input(&state, &anonymous_key, &name, Some(code)).await;
+        let anonymous = register_anonymous(State(state.clone()), Json(input)).await.unwrap().0;
+        assert_eq!(anonymous.invited_by.as_deref(), Some(username.as_str()));
+        let referrals: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM referrals WHERE invited_id = $1")
+            .bind(anonymous.user_id).fetch_one(&state.db).await.unwrap();
+        assert_eq!(referrals, 1);
+        let friendship: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM friend_requests WHERE sender_id = $1 AND receiver_id = $2 AND status = 'accepted')")
+            .bind(inviter.user_id).bind(anonymous.user_id).fetch_one(&state.db).await.unwrap();
+        assert!(friendship);
+        let visible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM explore_profiles WHERE user_id = $1 AND is_visible)")
+            .bind(anonymous.user_id).fetch_one(&state.db).await.unwrap();
+        assert!(!visible);
+
+        let other_key = fresh_signing_key();
+        let duplicate = registration_input(&state, &other_key, &name, None).await;
+        assert!(matches!(register_anonymous(State(state.clone()), Json(duplicate)).await, Err(ApiError::Conflict(_))));
+        let reserved = registration_input(&state, &other_key, "admin", None).await;
+        assert!(matches!(register_anonymous(State(state.clone()), Json(reserved)).await, Err(ApiError::Conflict(_))));
+        sqlx::query("DELETE FROM profiles WHERE id = ANY($1)").bind(vec![inviter.user_id, anonymous.user_id])
+            .execute(&state.db).await.unwrap();
     }
 }

@@ -33,7 +33,8 @@ use crate::{
     error::ApiError,
     models::{MessageRow, StoredMessage},
     routes::{conversations::require_participant, friends::are_friends},
-    growth,
+    growth::{self, GrowthKind},
+    streaks,
 };
 
 const NONCE_BYTES: usize = 24;
@@ -779,9 +780,41 @@ async fn send_message(
     // next open the app.
     notify_offline_recipient(state, peer, input.conversation_id, &user.username).await;
 
-    // The first intentional conversation activity of a day can advance connection
-    // growth. Message quantity and time online never affect it.
-    let growth_awards = growth::touch_connection(&state.db, user.id).await?;
+    // Sending advances the daily check-in, the rhythm bonus, and -- since the
+    // engagement rebalance -- the message source itself. All three are capped
+    // in `growth_daily`, so a scripted pair of accounts cannot mint points.
+    let mut growth_awards = growth::touch_connection(&state.db, user.id).await?;
+    growth_awards.push(
+        growth::award(&state.db, user.id, GrowthKind::Message, growth::POINTS_PER_MESSAGE).await?,
+    );
+
+    // A streak belongs to the pair and only advances on a day both have sent,
+    // so this is recorded for the sender and read by both.
+    let streak = streaks::touch(&state.db, user.id, peer).await?;
+    if streak.days > 0 {
+        growth_awards.push(
+            growth::award(
+                &state.db,
+                user.id,
+                GrowthKind::Streak,
+                growth::POINTS_PER_STREAK_DAY * streak.days,
+            )
+            .await?,
+        );
+        // Both sides see the same number, so both are told about it.
+        publish(
+            state,
+            EventTarget::Pair(user.id, peer),
+            "streak.updated",
+            json!({
+                "conversation_id": input.conversation_id,
+                "days": streak.days,
+                "extended_today": streak.extended_today,
+                "at_risk": streak.at_risk,
+            }),
+        );
+    }
+
     let promoted = growth_awards.iter().find_map(|entry| entry.promoted_to);
     if let Some(level) = promoted {
         publish(

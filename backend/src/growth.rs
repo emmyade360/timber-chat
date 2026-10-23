@@ -1,10 +1,19 @@
-//! Connection-growth progression.
+//! Growth progression.
 //!
-//! Growth is deliberately not a measure of a person's health or worth. It is a
-//! gentle record of sustainable, consent-based connection: one intentional check-in
-//! per day, a small rhythm bonus, and mutually accepted friendships. The relay never
-//! examines message text, and neither message volume nor time spent online earns
-//! points.
+//! This module used to implement the opposite of what it does now. Growth was
+//! built to resist engagement loops: 44 points a day, about a year to the top
+//! stage, and explicitly nothing for message volume, popularity or referrals.
+//! That was a deliberate product stance and it has been deliberately reversed --
+//! sending, returning, keeping streaks and bringing people in all earn now.
+//!
+//! Two things survive the change, because they are correctness rather than
+//! philosophy:
+//!
+//!   * Daily caps. Not to keep growth "gentle", but because uncapped points are
+//!     farmable -- two accounts messaging each other in a loop would otherwise
+//!     mint an unbounded score, and a leaderboard makes that worth doing.
+//!   * The relay still never reads message content. Growth is awarded for the
+//!     fact that an envelope was sent, never for anything inside it.
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -15,13 +24,20 @@ use crate::{error::ApiError, levels};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrowthKind {
-    /// The first intentional conversation activity of a calendar day.
+    /// The first conversation activity of a calendar day.
     CheckIn,
-    /// A small, capped bonus for returning steadily. Missing a day resets the
-    /// rhythm, but never removes points already earned.
+    /// A bonus for returning steadily. Missing a day resets the rhythm, but
+    /// never removes points already earned.
     Rhythm,
     /// A friendship that both people explicitly accepted.
     Connection,
+    /// Sending an envelope. Capped, because a pair of accounts can trade
+    /// messages as fast as the rate limiter allows.
+    Message,
+    /// Keeping a per-friendship streak alive, worth more the longer it runs.
+    Streak,
+    /// Someone joined through this account's invite.
+    Referral,
 }
 
 impl GrowthKind {
@@ -30,23 +46,40 @@ impl GrowthKind {
             Self::CheckIn => "check_in",
             Self::Rhythm => "rhythm",
             Self::Connection => "connection",
+            Self::Message => "message",
+            Self::Streak => "streak",
+            Self::Referral => "referral",
         }
     }
 
-    /// Maximum growth points this practice can contribute in one calendar day.
+    /// Maximum growth points this source can contribute in one calendar day.
+    ///
+    /// These are anti-farming limits, not pacing. Each is set well above what
+    /// ordinary use reaches, so a real person never feels it and a scripted
+    /// pair of accounts does.
     pub fn daily_cap(self) -> i32 {
         match self {
             Self::CheckIn => 30,
-            Self::Rhythm => 14,
-            Self::Connection => 60,
+            Self::Rhythm => 50,
+            Self::Connection => 100,
+            Self::Message => 120,
+            Self::Streak => 150,
+            Self::Referral => 1_000,
         }
     }
 }
 
 pub const POINTS_PER_CHECK_IN: i32 = 30;
-pub const POINTS_PER_RHYTHM_DAY: i32 = 2;
-pub const MAX_RHYTHM_BONUS: i32 = 14;
-pub const POINTS_PER_CONNECTION: i32 = 30;
+pub const POINTS_PER_RHYTHM_DAY: i32 = 5;
+pub const MAX_RHYTHM_BONUS: i32 = 50;
+pub const POINTS_PER_CONNECTION: i32 = 50;
+/// Per envelope sent. Small on purpose: the cap is reached by a normal day of
+/// conversation, so the reward is for talking to people, not for volume.
+pub const POINTS_PER_MESSAGE: i32 = 2;
+/// Per day of a live streak, so a long streak is worth protecting.
+pub const POINTS_PER_STREAK_DAY: i32 = 5;
+/// Per account that joins through an invite.
+pub const POINTS_PER_REFERRAL: i32 = 250;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct GrowthAward {
@@ -166,47 +199,89 @@ pub async fn touch_connection(db: &PgPool, user_id: Uuid) -> Result<Vec<GrowthAw
     ])
 }
 
-/// The maximum ordinary growth a day can yield. New connections are intentionally
-/// excluded: they are a welcome milestone, not a target to optimize for.
+/// The most an active day yields without new connections or referrals, which
+/// are milestones rather than something to plan a day around.
 pub fn daily_ceiling() -> i32 {
-    [GrowthKind::CheckIn, GrowthKind::Rhythm]
-        .iter()
-        .map(|kind| kind.daily_cap())
-        .sum()
+    [
+        GrowthKind::CheckIn,
+        GrowthKind::Rhythm,
+        GrowthKind::Message,
+        GrowthKind::Streak,
+    ]
+    .iter()
+    .map(|kind| kind.daily_cap())
+    .sum()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Every source stays capped. Not for pacing -- for the leaderboard, which
+    // turns any uncapped source into something worth scripting.
     #[test]
-    fn every_practice_is_capped() {
-        for kind in [GrowthKind::CheckIn, GrowthKind::Rhythm, GrowthKind::Connection] {
+    fn every_source_is_capped() {
+        for kind in [
+            GrowthKind::CheckIn,
+            GrowthKind::Rhythm,
+            GrowthKind::Connection,
+            GrowthKind::Message,
+            GrowthKind::Streak,
+            GrowthKind::Referral,
+        ] {
             assert!(kind.daily_cap() > 0, "{kind:?} must have a cap");
         }
     }
 
     #[test]
-    fn practice_names_are_stable() {
-        // These values are primary-key values in growth_daily.
+    fn source_names_are_stable() {
+        // These values are primary-key values in growth_daily; renaming one
+        // silently resets every existing daily subtotal under the old name.
         assert_eq!(GrowthKind::CheckIn.as_str(), "check_in");
         assert_eq!(GrowthKind::Rhythm.as_str(), "rhythm");
         assert_eq!(GrowthKind::Connection.as_str(), "connection");
+        assert_eq!(GrowthKind::Message.as_str(), "message");
+        assert_eq!(GrowthKind::Streak.as_str(), "streak");
+        assert_eq!(GrowthKind::Referral.as_str(), "referral");
     }
 
+    // The curve this release is tuned to. The old assertion here demanded
+    // roughly a year to the top stage; the product now wants a visible climb,
+    // so the same test pins the new intent instead of being deleted.
     #[test]
-    fn ordinary_growth_is_steady_not_grindable() {
-        assert_eq!(daily_ceiling(), 44);
-        let evergreen = levels::tier(levels::MAX_LEVEL).unwrap().threshold;
-        let days = evergreen / i64::from(daily_ceiling());
+    fn an_engaged_day_makes_visible_progress() {
+        assert_eq!(daily_ceiling(), 350);
+        let top = levels::tier(levels::MAX_LEVEL).unwrap().threshold;
+        let days = top / i64::from(daily_ceiling());
         assert!(
-            (280..=360).contains(&days),
-            "the top stage should take roughly a year of steady connection, got {days} days"
+            (30..=60).contains(&days),
+            "the top stage should take one to two months of heavy use, got {days} days"
+        );
+    }
+
+    // A casual user -- checking in, a short streak, a few messages -- should
+    // still cross the early stages quickly enough to notice.
+    #[test]
+    fn a_casual_day_still_moves_the_bar() {
+        let casual = POINTS_PER_CHECK_IN + POINTS_PER_STREAK_DAY + POINTS_PER_MESSAGE * 5;
+        let second_stage = levels::LADDER[1].threshold;
+        assert!(
+            i64::from(casual) >= second_stage,
+            "one ordinary day should clear the first stage, got {casual}"
         );
     }
 
     #[test]
     fn rhythm_bonus_is_bounded() {
         assert_eq!(MAX_RHYTHM_BONUS, GrowthKind::Rhythm.daily_cap());
+    }
+
+    // Referrals are the one source worth real points, so they are also the one
+    // most worth faking. The cap is what stops a scripted signup farm.
+    #[test]
+    fn referrals_are_generous_but_bounded() {
+        const { assert!(POINTS_PER_REFERRAL > POINTS_PER_CONNECTION) };
+        let per_day = GrowthKind::Referral.daily_cap() / POINTS_PER_REFERRAL;
+        assert!((1..=8).contains(&per_day), "got {per_day} referrals a day");
     }
 }
