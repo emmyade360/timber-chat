@@ -24,10 +24,25 @@ needs no lookup table and no server-assigned identifier.
 
 1. `POST /auth/challenge { identity_pk }` → a 32-byte nonce, valid 120s.
 2. Client signs the nonce with the key derived from its recovery phrase.
-3. `POST /auth/register` includes an Ed25519 signature binding the deterministic
+3. `POST /auth/register` (or `/auth/register/anonymous`) includes an Ed25519 signature binding the deterministic
    X25519 key to the account; clients reject peers without that proof.
-4. `POST /auth/register` or `POST /auth/login` exchanges the signature for a
+4. Either registration endpoint or `POST /auth/login` exchanges the signature for a
    revocable, opaque bearer session valid for 15 minutes.
+
+Anonymous registration requires the same chosen username, public keys, key
+attestation, nonce signature, and optional invitation as standard registration.
+The endpoint sets `is_anonymous=true`; clients cannot override that mode in the
+payload. Both registration responses, login, and `GET /api/users/me` return the
+owner-only `is_anonymous` flag. Public profiles, friends, and search omit it.
+Existing accounts default to `false` through migration 0011.
+
+The browser stages signup keys and details encrypted in IndexedDB before making
+a registration request. Retries sign in to an already-created identity, and a
+successful signup atomically promotes those same keys into the active vault.
+Anonymous sessions disable optional usage analytics and automatic backup nudges.
+They retain the normal username search and consent-based friendship rules;
+Explore remains opt-in. Device storage can still be cleared by its owner or
+browser, so a UUID alone is never advertised as a recovery credential.
 
 Challenges use a server-generated 32-byte CSPRNG nonce and are deleted only after
 a valid signature. An invalid request cannot consume or replace a live challenge

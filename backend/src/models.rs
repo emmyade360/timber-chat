@@ -69,6 +69,7 @@ impl From<UserSearchRow> for SearchResult {
 pub struct SelfProfileRow {
     pub id: Uuid,
     pub username: String,
+    pub is_anonymous: bool,
     pub avatar_url: Option<String>,
     pub is_online: bool,
     pub last_seen: Option<DateTime<Utc>>,
@@ -83,6 +84,7 @@ pub struct SelfProfileRow {
 pub struct SelfProfile {
     pub id: Uuid,
     pub username: String,
+    pub is_anonymous: bool,
     pub avatar_url: Option<String>,
     pub is_online: bool,
     pub last_seen: Option<DateTime<Utc>>,
@@ -110,6 +112,7 @@ impl From<SelfProfileRow> for SelfProfile {
         Self {
             id: row.id,
             username: row.username,
+            is_anonymous: row.is_anonymous,
             avatar_url: row.avatar_url,
             is_online: row.is_online,
             last_seen: row.last_seen,

@@ -28,6 +28,19 @@ TURN shared secret. `VITE_*` values are public build-time URLs, not secrets.
 
 ## 1. Deploy the backend to Render
 
+For anonymous signup, deploy the backend containing migration
+`0011_anonymous_accounts.sql` first. Startup applies the additive column before
+serving `POST /auth/register/anonymous`. Verify `/health`, then publish the new
+frontend. Existing users retain their IDs, keys, usernames, and chat history.
+The frontend keeps optional analytics disabled until an account's mode is known;
+onboarding and anonymous sessions never enable it.
+
+For local/CI database verification, set `TEST_DATABASE_URL` to a disposable
+Postgres database and run `cargo test --locked`. Auth integration tests apply
+the real SQLx migrations and exercise anonymous signup, login, username rules,
+invitations, and owner-only profile metadata. Do not use a production database
+for these tests.
+
 The included [render.yaml](./render.yaml) creates one Rust Web Service with:
 
 - root directory `backend`

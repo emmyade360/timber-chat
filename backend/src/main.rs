@@ -270,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_api = Router::new()
         .route("/challenge", post(auth::challenge))
         .route("/register", post(auth::register))
+        .route("/register/anonymous", post(auth::register_anonymous))
         .route("/login", post(auth::login))
         // Authentication requests consist solely of public keys and signatures.
         // Keep malformed requests from claiming the attachment upload budget.

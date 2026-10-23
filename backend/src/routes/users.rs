@@ -186,7 +186,7 @@ pub async fn get_current_user(
 ) -> Result<Json<SelfProfile>, ApiError> {
     let profile = sqlx::query_as::<_, SelfProfileRow>(
         r#"
-        SELECT id, username, avatar_url, is_online, last_seen, growth_points, level,
+        SELECT id, username, is_anonymous, avatar_url, is_online, last_seen, growth_points, level,
                streak_days, last_active_date, created_at
         FROM profiles WHERE id = $1
         "#,
@@ -266,7 +266,7 @@ pub async fn update_current_user(
         UPDATE profiles
         SET avatar_url = $2
         WHERE id = $1
-        RETURNING id, username, avatar_url, is_online, last_seen, growth_points, level,
+        RETURNING id, username, is_anonymous, avatar_url, is_online, last_seen, growth_points, level,
                   streak_days, last_active_date, created_at
         "#,
     )
